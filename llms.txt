@@ -1,0 +1,224 @@
+# x402-wallet
+
+> CLI wallet for x402 internet-native payments protocol
+
+## Quick Reference
+
+Repository: https://github.com/0xkoda/x402-wallet
+License: AGPL-3.0
+Protocol: x402 v1 (HTTP 402 Payment Required)
+Networks: Ethereum (1), Base (8453), Base Sepolia (84532)
+
+## What This Tool Does
+
+x402-wallet is a command-line tool that creates EIP-3009 payment signatures for x402-protected APIs. It enables you to:
+
+1. Create cryptographic payment authorizations without on-chain transactions
+2. Pay for API access using USDC on EVM networks
+3. Manage wallet balances and send tokens
+4. Integrate with automation and AI agent workflows
+
+## Installation
+
+git clone https://github.com/0xKoda/x402-wallet
+cd x402-wallet
+cargo build --release
+
+Binary location: ./target/release/x402-wallet
+
+## Critical: Storage Method Selection
+
+There are TWO ways to store the private key:
+
+### Option A: .env File (REQUIRED for AI Agents)
+
+Use this for:
+- AI coding agents (Claude Code, Gemini Code Assist, etc.)
+- Automation scripts
+- Any non-interactive workflow
+
+Initialize:
+./target/release/x402-wallet wallet-init
+
+Export to environment:
+export $(cat .env | xargs)
+
+### Option B: Encrypted Keystore (Manual Use Only)
+
+DO NOT USE for AI agents - prompts for password on every command.
+
+Initialize:
+./target/release/x402-wallet wallet-init --keystore
+
+## Commands
+
+### Wallet Management
+
+Get wallet address:
+./target/release/x402-wallet wallet-address
+
+Check ETH balance:
+./target/release/x402-wallet balance
+
+Check USDC balance (Base):
+./target/release/x402-wallet balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+
+### Network Configuration
+
+Set network to Base mainnet:
+./target/release/x402-wallet config-set --network base
+
+Set network to Base Sepolia:
+./target/release/x402-wallet config-set --network base-sepolia
+
+Verify current network:
+cat ~/.x402wallet/config.json
+
+### x402 Payment Flow (MOST IMPORTANT)
+
+This is the primary use case for AI agents.
+
+Step 1: Make initial HTTP request to x402-protected resource
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"your":"data"}' \
+  https://api.example.com/endpoint
+
+Expected response: HTTP 402 Payment Required with JSON body containing:
+- payTo: recipient address
+- asset: token contract address (usually USDC)
+- maxAmountRequired: amount in smallest units (e.g., 10000 = $0.01 USDC)
+- extra.name: token name (e.g., "USD Coin")
+- extra.version: token version (e.g., "2")
+
+Step 2: Create payment signature using details from 402 response
+./target/release/x402-wallet create-payment \
+  --pay-to ADDRESS_FROM_RESPONSE \
+  --token TOKEN_FROM_RESPONSE \
+  --amount AMOUNT_FROM_RESPONSE \
+  --token-name "USD Coin" \
+  --token-version "2" > payment.txt
+
+Step 3: Retry original request with X-PAYMENT header
+curl -X POST -H "Content-Type: application/json" \
+  -H "X-PAYMENT: $(cat payment.txt)" \
+  -d '{"your":"data"}' \
+  https://api.example.com/endpoint
+
+Expected response: HTTP 200 OK with requested resource
+
+### Send Tokens
+
+Send ETH:
+./target/release/x402-wallet send-eth \
+  --to 0xRECIPIENT_ADDRESS \
+  --eth 0.1
+
+Send USDC (Base):
+./target/release/x402-wallet send-erc20 \
+  --token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+  --to 0xRECIPIENT_ADDRESS \
+  --amount 10.5
+
+## Important Token Addresses
+
+USDC on Base (mainnet): 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+USDC on Base Sepolia: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+USDC on Ethereum: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+
+## AI Agent Workflow Pattern
+
+When a user asks you to interact with an x402-protected API:
+
+1. Parse user request to extract the API endpoint and request data
+2. Make initial POST/GET request to the endpoint
+3. If you receive HTTP 402:
+   a. Parse the response JSON to extract: payTo, asset, maxAmountRequired, extra.name, extra.version
+   b. Create a temporary file for the request body if needed
+   c. Run: x402-wallet create-payment with parsed parameters, redirect output to payment.txt
+   d. Retry the original request with -H "X-PAYMENT: $(cat payment.txt)"
+4. If you receive HTTP 200, return the response to the user
+5. Clean up temporary files
+
+## Common Issues
+
+"No private key found"
+Solution: Run wallet-init and export the .env file
+
+"Unlock keystore passphrase:" prompt appears
+Solution: You're using encrypted keystore mode. For automation, delete ~/.x402wallet/keystore.json and reinitialize with wallet-init (without --keystore flag)
+
+"RPC chain ID mismatch"
+Solution: Run config-set --network base to ensure you're on Base mainnet
+
+Payment fails with "invalid_type" errors
+Solution: Ensure you're passing --token-name and --token-version from the 402 response extra fields
+
+## File Locations
+
+Config: ~/.x402wallet/config.json
+Keystore (if used): ~/.x402wallet/keystore.json
+.env file: ./.env (in current directory where wallet-init was run)
+
+## Security Notes for AI Agents
+
+- Always use a wallet with minimal funds ($1-10 for testing)
+- Never use a user's main wallet or seed phrase
+- Private keys in .env are plaintext - only use for dedicated test wallets
+- Payment signatures expire after 10 minutes
+- Payments cannot be revoked once signed
+
+## Payment Details
+
+- Protocol: x402 v1
+- Payment scheme: "exact" (EIP-3009 transfer with authorization)
+- Token: USDC (or any ERC20 supporting EIP-3009)
+- Validity: 10 minutes from creation
+- Gas: Paid by recipient, not sender (gasless for payer)
+
+## Example Complete Interaction
+
+User request: "Pay for access to https://api.example.com/data"
+
+Agent workflow:
+1. curl -X POST https://api.example.com/data
+   Response: {"error":"X-PAYMENT header required","accepts":[{"payTo":"0xABC...","asset":"0x833...","maxAmountRequired":"10000",...}]}
+
+2. Extract: payTo=0xABC..., asset=0x833..., amount=10000
+   
+3. x402-wallet create-payment --pay-to 0xABC... --token 0x833... --amount 10000 --token-name "USD Coin" --token-version "2" > payment.txt
+
+4. curl -X POST -H "X-PAYMENT: $(cat payment.txt)" https://api.example.com/data
+   Response: {"data":"..."}
+
+5. Return data to user, clean up payment.txt
+
+## Configuration File Format
+
+~/.x402wallet/config.json structure:
+{
+  "network": "base",
+  "rpc": {
+    "ethereum": "https://cloudflare-eth.com",
+    "base": "https://mainnet.base.org",
+    "base-sepolia": "https://sepolia.base.org"
+  }
+}
+
+## Links
+
+GitHub: https://github.com/0xkoda/x402-wallet
+README: https://github.com/0xkoda/x402-wallet/blob/main/README.md
+Agent Instructions (detailed): https://github.com/0xkoda/x402-wallet/blob/main/res.md
+x402 Protocol: https://x402.org
+x402 Docs: https://x402.gitbook.io/x402
+EIP-3009: https://eips.ethereum.org/EIPS/eip-3009
+License: https://www.gnu.org/licenses/agpl-3.0.en.html
+
+## Key Takeaways for LLMs
+
+1. ALWAYS use .env method, NEVER --keystore for automation
+2. Payment flow is: request → 402 response → parse details → create-payment → retry with header
+3. Save create-payment output to file, then use $(cat file.txt) in X-PAYMENT header
+4. Payments expire in 10 minutes - create fresh for each request
+5. The wallet ONLY creates payment signatures - YOU handle all HTTP requests
+6. Check balance before attempting payment: balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
