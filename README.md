@@ -161,6 +161,8 @@ Set a strong passphrase when prompted. Every command will then ask for your pass
 
 ## Usage
 
+**Note: the CLI works best with a good prompt. Ensure you have a file like [wallet.md](https://github.com/0xKoda/x402-wallet/blob/main/wallet.md) that clearly explains to the agent how to use the wallet**
+
 ### X402 Payments
 
 Pay for an x402-protected API:
@@ -290,13 +292,14 @@ Setup for agents:
     # 3. Now agents can use all commands
     ./target/release/x402-wallet create-payment ...
 
-See `res.md` for detailed agent instructions.
+See `wallet.md` for detailed agent instructions.
 
 **Example workflow:**
-1. Agent makes HTTP request → gets 402 Payment Required
-2. Agent parses payment details from response
-3. Agent calls `x402-wallet create-payment` with parsed params
-4. Agent retries HTTP request with `X-PAYMENT` header
+1. You prompt the agent which requires it use some external x402 resource
+2. Agent makes HTTP request → gets 402 Payment Required
+3. Agent parses payment details from response
+4. Agent calls `x402-wallet create-payment` with parsed params
+5. Agent retries HTTP request with `X-PAYMENT` header
 
 ## Token Addresses
 
