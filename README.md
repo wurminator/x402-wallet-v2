@@ -7,11 +7,11 @@ A command-line wallet for the [x402 payment protocol](https://x402.org). Create 
 
 ## Features
 
-- ✅ **X402 payments** - Create EIP-3009 payment signatures for x402-protected APIs and resources
-- ✅ **Multi-network** - Supports Ethereum, Base, and Base Sepolia
-- ✅ **Secure storage** - Encrypted keystore or `.env` file
-- ✅ **Full wallet** - Check balances, send ETH/ERC20 tokens
-- ✅ **LLM-friendly** - Designed for use by AI coding agents (Claude Code, Gemini etc)
+- **X402 payments** - Create EIP-3009 payment signatures for x402-protected APIs and resources
+- **Multi-network** - Supports Ethereum, Base, and Base Sepolia
+- **Secure storage** - Encrypted keystore or `.env` file
+- **Full wallet** - Check balances, send ETH/ERC20 tokens
+- **LLM-friendly** - Designed for use by AI coding agents (Claude Code, Gemini etc)
 
 --- 
 
@@ -28,11 +28,11 @@ This software is under active development and may contain bugs or experience bre
 - The EIP-3009 payment signatures authorize token transfers - treat them like signed checks
 
 **Recommendations:**
-- ✅ Use a fresh wallet with only test amounts ($1-10 USD)
-- ✅ Review source code before running
-- ✅ Test on Base Sepolia testnet first
-- ❌ Do NOT use your main wallet or seed phrase
-- ❌ Do NOT store significant funds in this wallet
+- Use a fresh wallet with only small amounts ($1-10 USD)
+- Review source code before running
+- Test on Base Sepolia testnet first
+- Do NOT use your main wallet or seed phrase
+- Do NOT store significant funds in this wallet
 
 **If you are unsure about the security implications, do not use this software.**
 
@@ -78,19 +78,11 @@ At the prompt `Create new private key (y/N)?`:
 - Press `y` to generate a new random private key
 - Press `N` to import your own existing private key (you'll be prompted to paste it)
 
-Then export the private key to your shell:
-
-    # Export the private key to your shell environment
-    export $(cat .env | xargs)
-
-    # Now all commands work without password prompts
-    ./target/release/x402-wallet wallet-address
-
 **When to use:**
-- ✅ AI agent automation (Claude Code, Gemini, etc.)
-- ✅ Scripts and programmatic access
-- ✅ Testing and development
-- ✅ Wallets with minimal funds only
+- AI agent automation (Claude Code, Gemini, etc.)
+- Scripts and programmatic access
+- Testing and development
+- Wallets with minimal funds only
 
 #### Option B: Encrypted keystore (More Secure, Manual Use Only)
 
@@ -119,10 +111,10 @@ Set a strong passphrase when prompted. Every command will then ask for your pass
     # (prompts: "Unlock keystore passphrase:")
 
 **When to use:**
-- ✅ Manual/interactive use only
-- ✅ When you want password-protected keys
-- ❌ **NOT for AI agents** - they cannot enter passwords
-- ❌ **NOT for automation** - scripts will hang on password prompt
+- Manual/interactive use only
+- When you want password-protected keys
+- **NOT for AI agents** - they cannot enter passwords
+- **NOT for automation** - scripts will hang on password prompt
 
 ### Fund Your Wallet
 
@@ -134,7 +126,7 @@ Set a strong passphrase when prompted. Every command will then ask for your pass
 
        ./target/release/x402-wallet wallet-address
 
-3. Send USDC to that address on Base mainnet (use a small amount for testing, $1-10 recommended)
+3. Send USDC to that address on Base mainnet (use a small amount, $1-10 recommended)
 
 4. Check your balance:
 
@@ -281,17 +273,6 @@ This wallet is designed for use by LLM coding agents (Claude Code, Gemini Code A
 
 **IMPORTANT:** AI agents **cannot use the encrypted keystore** because they cannot enter passwords interactively. Always use the `.env` method for agent workflows.
 
-Setup for agents:
-
-    # 1. Initialize with .env (not --keystore)
-    ./target/release/x402-wallet wallet-init
-
-    # 2. Export the key
-    export $(cat .env | xargs)
-
-    # 3. Now agents can use all commands
-    ./target/release/x402-wallet create-payment ...
-
 See `wallet.md` for detailed agent instructions.
 
 **Example workflow:**
@@ -301,11 +282,6 @@ See `wallet.md` for detailed agent instructions.
 4. Agent calls `x402-wallet create-payment` with parsed params
 5. Agent retries HTTP request with `X-PAYMENT` header
 
-## Token Addresses
-
-**USDC on Base (mainnet):** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`  
-**USDC on Base Sepolia:** `0x036CbD53842c5426634e7929541eC2318f3dCF7e`  
-**USDC on Ethereum:** `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`
 
 ## Commands Reference
 
@@ -368,33 +344,6 @@ Insufficient ETH for gas or network congestion. Check ETH balance:
 **Payment authorization fails**  
 Ensure you're using correct `--token-name` and `--token-version` from the 402 response `extra` fields.
 
-## Development
-
-Build from source:
-
-    cargo build --release
-
-Run tests:
-
-    cargo test
-
-Format code:
-
-    cargo fmt
-
-Lint:
-
-    cargo clippy
-
-## How It Works
-
-1. **You request a protected resource** → Server responds 402 Payment Required
-2. **Server tells you payment details** → `payTo`, `token`, `amount`, etc.
-3. **You sign an authorization** → EIP-3009 `TransferWithAuthorization`
-4. **You retry with signed payment** → Server validates and processes request
-5. **Server executes token transfer** → Uses your signature to claim payment
-
-The beauty of EIP-3009: **You don't pay gas fees**. The recipient executes the transfer using your signed authorization.
 
 ## Contributing
 
@@ -404,7 +353,7 @@ Contributions welcome! Please:
 3. Make your changes with tests
 4. Submit a pull request
 
-By contributing, you agree to license your contributions under AGPL-3.0.
+By contributing, you agree to license.
 
 ## License
 
