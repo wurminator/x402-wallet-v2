@@ -17,6 +17,8 @@ The x402-wallet CLI handles step 3 (signing payments). You handle everything els
 
 ## Universal Workflow (Works for Any x402 Resource)
 
+**Note, a list of available resources can be found in the resource-list.md file or at https://github.com/0xKoda/x402-wallet/blob/main/resource-list.md**
+
 ### Step 1: Make Initial Request
 
 Make your normal HTTP request to any x402-protected endpoint:

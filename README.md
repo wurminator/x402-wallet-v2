@@ -46,7 +46,11 @@ This software is under active development and may contain bugs or experience bre
     cd x402-wallet
     cargo build --release
 
-The binary will be at `./target/release/x402-wallet`
+The binary will be at `./target/release/x402-wallet` or you can add it to your path. 
+
+To give the LLM context about x402-wallet, it is recommended you reference [wallet.md](https://github.com/0xKoda/x402-wallet/blob/main/wallet.md) or add your own.
+
+You should also give your agent access to a list of resources, you can use [resource-list.md](https://github.com/0xKoda/x402-wallet/blob/main/resource-list.md) or add your own. 
 
 ### Setup
 
@@ -402,16 +406,6 @@ By contributing, you agree to license your contributions under AGPL-3.0.
 ## License
 
 **AGPL-3.0** - This software is licensed under the GNU Affero General Public License v3.0.
-
-**What this means:**
-- ✅ Free for personal use, research, and open-source projects
-- ✅ You can modify and redistribute the code
-- ⚠️ If you use this in a network service (API, SaaS, web app), you **must** open-source your entire application under AGPL-3.0
-- 💼 Need to use this in proprietary software? Contact [your@email.com] for a commercial license
-
-See the `LICENSE` file for full terms.
-
-Read the license: https://www.gnu.org/licenses/agpl-3.0.en.html
 
 **Why AGPL?** This ensures that if companies build services using this wallet, they contribute back to the community by open-sourcing their code. If you want to use this commercially without open-sourcing, please contact us for licensing options.
 
