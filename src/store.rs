@@ -114,7 +114,7 @@ async fn load_private_key_hex() -> Result<String> {
         let s = String::from_utf8(pt)?;
         return normalize_pk(&s);
     }
-    Err(anyhow!("No private key. Use `x402-wallet wallet init` or set X402_WALLET_PRIVATE_KEY in .env"))
+    Err(anyhow!("No private key. Use `x402-wallet wallet-init` or set X402_WALLET_PRIVATE_KEY in .env"))
 }
 
 pub async fn load_wallet_context() -> Result<WalletContext> {
