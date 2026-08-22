@@ -4,9 +4,9 @@
 
 ## Quick Reference
 
-Repository: https://github.com/0xkoda/x402-wallet
+Repository: https://github.com/wurminator/x402-wallet-v2
 License: AGPL-3.0
-Protocol: x402 v1 (HTTP 402 Payment Required)
+Protocol: x402 v1 and v2 (HTTP 402 Payment Required)
 Networks: Ethereum (1), Base (8453), Base Sepolia (84532)
 
 ## What This Tool Does
@@ -20,8 +20,8 @@ x402-wallet is a command-line tool that creates EIP-3009 payment signatures for 
 
 ## Installation
 
-git clone https://github.com/0xKoda/x402-wallet
-cd x402-wallet
+git clone https://github.com/wurminator/x402-wallet-v2
+cd x402-wallet-v2
 cargo build --release
 
 Binary location: ./target/release/x402-wallet
@@ -76,21 +76,26 @@ cat ~/.x402wallet/config.json
 
 ### x402 Payment Flow (MOST IMPORTANT)
 
-This is the primary use case for AI agents.
+This is the primary use case for AI agents. The wallet supports v1 and v2; the SERVER decides which version. Detect it from the 402 response:
+- v2: requirements are Base64-JSON in the "PAYMENT-REQUIRED" response header (amount field: "amount", network: CAIP-2 like "eip155:8453", has "maxTimeoutSeconds")
+- v1: requirements are in the JSON response body (amount field: "maxAmountRequired", network: "base")
 
 Step 1: Make initial HTTP request to x402-protected resource
 curl -X POST -H "Content-Type: application/json" \
   -d '{"your":"data"}' \
   https://api.example.com/endpoint
 
-Expected response: HTTP 402 Payment Required with JSON body containing:
+Expected response: HTTP 402 Payment Required. Extract from requirements (accepts[0]):
 - payTo: recipient address
 - asset: token contract address (usually USDC)
-- maxAmountRequired: amount in smallest units (e.g., 10000 = $0.01 USDC)
-- extra.name: token name (e.g., "USD Coin")
+- maxAmountRequired (v1) / amount (v2): amount in smallest units (e.g., 10000 = $0.01 USDC)
+- maxTimeoutSeconds (v2 only): payment completion timeout
+- extra.name: token name (e.g., "USD Coin" or "USDC")
 - extra.version: token version (e.g., "2")
 
 Step 2: Create payment signature using details from 402 response
+
+For v1 servers (default):
 ./target/release/x402-wallet create-payment \
   --pay-to ADDRESS_FROM_RESPONSE \
   --token TOKEN_FROM_RESPONSE \
@@ -98,13 +103,35 @@ Step 2: Create payment signature using details from 402 response
   --token-name "USD Coin" \
   --token-version "2" > payment.txt
 
-Step 3: Retry original request with X-PAYMENT header
+For v2 servers (add --v2, send as PAYMENT-SIGNATURE):
+./target/release/x402-wallet create-payment \
+  --v2 \
+  --resource-url RESOURCE_URL_FROM_RESPONSE \
+  --pay-to ADDRESS_FROM_RESPONSE \
+  --token TOKEN_FROM_RESPONSE \
+  --amount AMOUNT_FROM_RESPONSE \
+  --max-timeout-seconds MAX_TIMEOUT_FROM_RESPONSE \
+  --token-name "USDC" \
+  --token-version "2" > payment.txt
+
+Step 3: Retry original request with the matching payment header
+
+v1: X-PAYMENT header
 curl -X POST -H "Content-Type: application/json" \
   -H "X-PAYMENT: $(cat payment.txt)" \
   -d '{"your":"data"}' \
   https://api.example.com/endpoint
 
+v2: PAYMENT-SIGNATURE header
+curl -X POST -H "Content-Type: application/json" \
+  -H "PAYMENT-SIGNATURE: $(cat payment.txt)" \
+  -d '{"your":"data"}' \
+  https://api.example.com/endpoint
+
 Expected response: HTTP 200 OK with requested resource
+
+Network note (v2): requirements use CAIP-2 ids - map to wallet config:
+eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia
 
 ### Send Tokens
 
@@ -132,10 +159,14 @@ When a user asks you to interact with an x402-protected API:
 1. Parse user request to extract the API endpoint and request data
 2. Make initial POST/GET request to the endpoint
 3. If you receive HTTP 402:
-   a. Parse the response JSON to extract: payTo, asset, maxAmountRequired, extra.name, extra.version
-   b. Create a temporary file for the request body if needed
-   c. Run: x402-wallet create-payment with parsed parameters, redirect output to payment.txt
-   d. Retry the original request with -H "X-PAYMENT: $(cat payment.txt)"
+   a. Detect version: "PAYMENT-REQUIRED" response header present = v2, otherwise v1
+   b. Parse the requirements (v2 header / v1 body) to extract: payTo, asset,
+      maxAmountRequired (v1) or amount (v2), maxTimeoutSeconds (v2), extra.name, extra.version
+   c. Create a temporary file for the request body if needed
+   d. Run: x402-wallet create-payment with parsed parameters
+      (add --v2 --resource-url --max-timeout-seconds for v2), redirect output to payment.txt
+   e. Retry the original request with -H "X-PAYMENT: $(cat payment.txt)" (v1)
+      or -H "PAYMENT-SIGNATURE: $(cat payment.txt)" (v2)
 4. If you receive HTTP 200, return the response to the user
 5. Clean up temporary files
 
@@ -169,7 +200,7 @@ Keystore (if used): ~/.x402wallet/keystore.json
 
 ## Payment Details
 
-- Protocol: x402 v1
+- Protocol: x402 v1 and v2 (server decides; detect via PAYMENT-REQUIRED header)
 - Payment scheme: "exact" (EIP-3009 transfer with authorization)
 - Token: USDC (or any ERC20 supporting EIP-3009)
 - Validity: 10 minutes from creation
@@ -192,6 +223,11 @@ Agent workflow:
 
 5. Return data to user, clean up payment.txt
 
+For a v2 server the flow is identical, except:
+- Read requirements from the PAYMENT-REQUIRED response header (Base64 JSON)
+- Add --v2 --resource-url URL --max-timeout-seconds N to create-payment
+- Send the payment in the "PAYMENT-SIGNATURE" header instead of "X-PAYMENT"
+
 ## Configuration File Format
 
 ~/.x402wallet/config.json structure:
@@ -206,19 +242,22 @@ Agent workflow:
 
 ## Links
 
-GitHub: https://github.com/0xkoda/x402-wallet
-README: https://github.com/0xkoda/x402-wallet/blob/main/README.md
-Agent Instructions (detailed): https://github.com/0xkoda/x402-wallet/blob/main/res.md
+GitHub: https://github.com/wurminator/x402-wallet-v2
+README: https://github.com/wurminator/x402-wallet-v2/blob/main/README.md
+Agent Instructions (detailed): https://github.com/wurminator/x402-wallet-v2/blob/main/wallet.md
 x402 Protocol: https://x402.org
 x402 Docs: https://x402.gitbook.io/x402
+x402 v1-to-v2 Migration Guide: https://docs.x402.org/guides/migration-v1-to-v2
 EIP-3009: https://eips.ethereum.org/EIPS/eip-3009
 License: https://www.gnu.org/licenses/agpl-3.0.en.html
 
 ## Key Takeaways for LLMs
 
 1. ALWAYS use .env method, NEVER --keystore for automation
-2. Payment flow is: request → 402 response → parse details → create-payment → retry with header
-3. Save create-payment output to file, then use $(cat file.txt) in X-PAYMENT header
-4. Payments expire in 10 minutes - create fresh for each request
-5. The wallet ONLY creates payment signatures - YOU handle all HTTP requests
-6. Check balance before attempting payment: balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+2. Payment flow is: request -> 402 response -> parse details -> create-payment -> retry with header
+3. Detect the version: PAYMENT-REQUIRED response header = v2 (use --v2, PAYMENT-SIGNATURE header);
+   requirements in the body = v1 (X-PAYMENT header)
+4. Save create-payment output to file, then use $(cat file.txt) in the payment header
+5. Payments expire in 10 minutes - create fresh for each request
+6. The wallet ONLY creates payment signatures - YOU handle all HTTP requests
+7. Check balance before attempting payment: balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913

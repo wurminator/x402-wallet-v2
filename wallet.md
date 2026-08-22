@@ -17,7 +17,9 @@ The x402-wallet CLI handles step 3 (signing payments). You handle everything els
 
 ## Universal Workflow (Works for Any x402 Resource)
 
-**Note, a list of available resources can be found in the resource-list.md file or at https://github.com/0xKoda/x402-wallet/blob/main/resource-list.md**
+**Note, a list of available resources can be found in the resource-list.md file**
+
+This wallet supports both x402 protocol versions: **v1** (payment header `X-PAYMENT`) and **v2** (payment header `PAYMENT-SIGNATURE`). The server decides which version it speaks — detect it from the 402 response (see Step 2).
 
 ### Step 1: Make Initial Request
 
@@ -34,7 +36,9 @@ Or for a GET request:
 
 ### Step 2: Receive 402 Payment Required
 
-The server will respond with HTTP status 402 and a JSON body containing payment requirements:
+Detect the protocol version from the response: **v1** sends payment requirements in the JSON **body**, **v2** sends them Base64-encoded in the **`PAYMENT-REQUIRED` HTTP header** (the body is free for other uses).
+
+**v1 response (requirements in body):**
 
     {
       "error": "X-PAYMENT header is required",
@@ -56,12 +60,49 @@ The server will respond with HTTP status 402 and a JSON body containing payment 
       "x402Version": 1
     }
 
+**v2 response (requirements Base64-encoded in `PAYMENT-REQUIRED` header):**
+
+    {
+      "x402Version": 2,
+      "error": "PAYMENT-SIGNATURE header is required",
+      "resource": {
+        "url": "https://api.example.com/protected-endpoint",
+        "description": "Service description",
+        "mimeType": "application/json"
+      },
+      "accepts": [
+        {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "amount": "10000",
+          "payTo": "0xRECIPIENT_ADDRESS",
+          "asset": "0xTOKEN_CONTRACT_ADDRESS",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        }
+      ]
+    }
+
+**Key differences between v1 and v2:**
+
+| | v1 | v2 |
+|---|---|---|
+| Requirements location | JSON response body | `PAYMENT-REQUIRED` header (Base64 JSON) |
+| Amount field | `maxAmountRequired` | `amount` |
+| Network format | `"base"`, `"ethereum"` | CAIP-2: `"eip155:8453"` |
+| Timeout field | — | `maxTimeoutSeconds` |
+| Payment header you send | `X-PAYMENT` | `PAYMENT-SIGNATURE` |
+
 **Key fields you need:**
 - `payTo` - Recipient wallet address
 - `asset` - Token contract address (usually USDC)
-- `maxAmountRequired` - Amount in smallest units (e.g., 10000 = $0.01 for USDC with 6 decimals)
-- `network` - Blockchain network (e.g., "base", "ethereum")
-- `extra.name` - Token name for signing (e.g., "USD Coin")
+- `maxAmountRequired` (v1) / `amount` (v2) - Amount in smallest units (e.g., 10000 = $0.01 for USDC with 6 decimals)
+- `network` - Blockchain network (v1: "base"; v2 CAIP-2: "eip155:8453")
+- `maxTimeoutSeconds` (v2) - Timeout echoed back in the payment
+- `extra.name` - Token name for signing (e.g., "USD Coin" or "USDC")
 - `extra.version` - Token version for signing (e.g., "2")
 
 ### Step 3: Extract Payment Parameters
@@ -70,14 +111,17 @@ Parse the 402 response and extract the payment details:
 
     payTo: accepts[0].payTo
     token: accepts[0].asset
-    amount: accepts[0].maxAmountRequired
-    network: accepts[0].network
+    amount: accepts[0].maxAmountRequired   (v1)  /  accepts[0].amount  (v2)
+    network: accepts[0].network            (v2 CAIP-2: eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia)
     tokenName: accepts[0].extra.name
     tokenVersion: accepts[0].extra.version
+    maxTimeoutSeconds: accepts[0].maxTimeoutSeconds   (v2 only)
 
 ### Step 4: Create Payment Signature
 
-Use x402-wallet to create the payment signature. **Always save to a file** to avoid truncation:
+Use x402-wallet to create the payment signature. **Always save to a file** to avoid truncation.
+
+**For v1 servers (default):**
 
     ./target/release/x402-wallet create-payment \
       --pay-to EXTRACTED_PAY_TO_ADDRESS \
@@ -86,7 +130,19 @@ Use x402-wallet to create the payment signature. **Always save to a file** to av
       --token-name "EXTRACTED_TOKEN_NAME" \
       --token-version "EXTRACTED_TOKEN_VERSION" > payment.txt
 
-**Example with actual values:**
+**For v2 servers (add `--v2`):**
+
+    ./target/release/x402-wallet create-payment \
+      --v2 \
+      --resource-url EXTRACTED_RESOURCE_URL \
+      --pay-to EXTRACTED_PAY_TO_ADDRESS \
+      --token EXTRACTED_ASSET_ADDRESS \
+      --amount EXTRACTED_AMOUNT \
+      --max-timeout-seconds EXTRACTED_MAX_TIMEOUT_SECONDS \
+      --token-name "EXTRACTED_TOKEN_NAME" \
+      --token-version "EXTRACTED_TOKEN_VERSION" > payment.txt
+
+**Example with actual values (v1):**
 
     ./target/release/x402-wallet create-payment \
       --pay-to 0xB360e5423cB09407B2E5faBf3E656182AbcA6C3A \
@@ -95,20 +151,35 @@ Use x402-wallet to create the payment signature. **Always save to a file** to av
       --token-name "USD Coin" \
       --token-version "2" > payment.txt
 
+**Example with actual values (v2):**
+
+    ./target/release/x402-wallet create-payment \
+      --v2 \
+      --resource-url https://api.example.com/protected-endpoint \
+      --pay-to 0xB360e5423cB09407B2E5faBf3E656182AbcA6C3A \
+      --token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+      --amount 10000 \
+      --max-timeout-seconds 60 \
+      --token-name "USDC" \
+      --token-version "2" > payment.txt
+
 ### Step 5: Retry Request with Payment Header
 
-Make the **exact same request** as Step 1, but include the `X-PAYMENT` header:
+Make the **exact same request** as Step 1, but include the payment header — `X-PAYMENT` for v1 servers, `PAYMENT-SIGNATURE` for v2 servers:
 
+    # v1
     curl -X POST \
       -H "Content-Type: application/json" \
       -H "X-PAYMENT: $(cat payment.txt)" \
       -d '{"your":"data"}' \
       https://api.example.com/protected-endpoint
 
-For GET requests:
-
-    curl -H "X-PAYMENT: $(cat payment.txt)" \
-      https://api.example.com/protected-resource
+    # v2
+    curl -X POST \
+      -H "Content-Type: application/json" \
+      -H "PAYMENT-SIGNATURE: $(cat payment.txt)" \
+      -d '{"your":"data"}' \
+      https://api.example.com/protected-endpoint
 
 ### Step 6: Receive Successful Response
 
@@ -207,14 +278,15 @@ The `accepts` array may contain multiple payment options. Typically you'll use t
 | Field | Description | Example |
 |-------|-------------|---------|
 | `scheme` | Payment method | `"exact"` (most common) |
-| `network` | Blockchain network | `"base"`, `"ethereum"`, `"base-sepolia"` |
-| `maxAmountRequired` | Amount in token's smallest unit | `"10000"` (= $0.01 USDC) |
+| `network` | Blockchain network (v2 uses CAIP-2) | `"base"` / `"eip155:8453"` |
+| `maxAmountRequired` / `amount` | Amount in token's smallest unit (v1 / v2 name) | `"10000"` (= $0.01 USDC) |
+| `maxTimeoutSeconds` | Payment completion timeout (v2) | `60` |
 | `payTo` | Recipient address | `"0xB360e5423cB09407B2E5faBf3E656182AbcA6C3A"` |
 | `asset` | Token contract address | `"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"` |
 | `resource` | The protected endpoint | `"https://api.example.com/endpoint"` |
 | `description` | What you're paying for | `"API access"` |
 | `mimeType` | Response content type | `"application/json"` |
-| `extra.name` | Token name for EIP-712 | `"USD Coin"` |
+| `extra.name` | Token name for EIP-712 | `"USD Coin"` / `"USDC"` |
 | `extra.version` | Token version for EIP-712 | `"2"` |
 
 ---
@@ -317,13 +389,14 @@ When a user asks you to interact with an x402-protected resource:
 2. **Check response status:**
    - If 200 OK → return result to user
    - If 402 Payment Required → continue to step 3
-3. **Parse 402 response** to extract: `payTo`, `asset`, `maxAmountRequired`, `extra.name`, `extra.version`
-4. **Verify network** matches wallet configuration
-5. **Check balance** (optional but recommended)
-6. **Create payment signature** using x402-wallet, save to file
-7. **Retry original request** with `X-PAYMENT` header
-8. **Return result** to user
-9. **Clean up** temporary payment file
+3. **Detect protocol version:** v2 if a `PAYMENT-REQUIRED` header is present, otherwise v1 (requirements in body)
+4. **Parse 402 response** to extract: `payTo`, `asset`, `maxAmountRequired` (v1) or `amount` (v2), `maxTimeoutSeconds` (v2), `extra.name`, `extra.version`
+5. **Verify network** matches wallet configuration (v2 CAIP-2: `eip155:8453` = base)
+6. **Check balance** (optional but recommended)
+7. **Create payment signature** using x402-wallet (add `--v2` for v2 servers), save to file
+8. **Retry original request** with `X-PAYMENT` (v1) or `PAYMENT-SIGNATURE` (v2) header
+9. **Return result** to user
+10. **Clean up** temporary payment file
 
 ---
 
@@ -338,7 +411,7 @@ When a user asks you to interact with an x402-protected resource:
 
 **x402-wallet CLI handles:**
 - Signing EIP-3009 payment authorizations
-- Generating X-PAYMENT header
+- Generating X-PAYMENT (v1) / PAYMENT-SIGNATURE (v2) headers
 - Managing private keys
 
 ---
@@ -378,7 +451,7 @@ When a user asks you to interact with an x402-protected resource:
 
 ## Payment Details
 
-**Protocol:** x402 v1  
+**Protocol:** x402 v1 and v2 (server decides; detect via `PAYMENT-REQUIRED` header)  
 **Payment scheme:** "exact" (EIP-3009 transfer with authorization)  
 **Token:** USDC (or any ERC20 supporting EIP-3009)  
 **Validity:** 10 minutes from signature creation  
@@ -452,12 +525,13 @@ The workflow is always the same:
 ## Key Takeaways
 
 1. **x402 is universal** - This workflow works for ANY x402-protected resource
-2. **Wallet only signs** - You handle all HTTP communication
-3. **Always parse 402 response** - Payment details vary by service
-4. **Save to file** - Prevents truncation issues
-5. **10-minute validity** - Create fresh payments for each request
-6. **Network matters** - Ensure wallet is on correct network
-7. **Same request twice** - Initial request and paid retry must be identical
+2. **Detect the version** - `PAYMENT-REQUIRED` header present = v2, otherwise v1; `--v2` flag + `PAYMENT-SIGNATURE` header for v2
+3. **Wallet only signs** - You handle all HTTP communication
+4. **Always parse 402 response** - Payment details vary by service
+5. **Save to file** - Prevents truncation issues
+6. **10-minute validity** - Create fresh payments for each request
+7. **Network matters** - Ensure wallet is on correct network (v2 uses CAIP-2 ids)
+8. **Same request twice** - Initial request and paid retry must be identical
 
 ---
 
@@ -465,6 +539,7 @@ The workflow is always the same:
 
 **x402 Protocol:** https://x402.org  
 **x402 Documentation:** https://x402.gitbook.io/x402  
+**x402 v1-to-v2 Migration Guide:** https://docs.x402.org/guides/migration-v1-to-v2  
 **EIP-3009 Specification:** https://eips.ethereum.org/EIPS/eip-3009  
-**Wallet Repository:** https://github.com/0xkoda/x402-wallet  
+**Wallet Repository:** https://github.com/wurminator/x402-wallet-v2  
 **x402 Ecosystem:** https://x402.gitbook.io/x402/getting-started/ecosystem
