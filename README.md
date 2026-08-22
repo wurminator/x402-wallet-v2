@@ -1,388 +1,255 @@
 ![x402-wallet banner](x402-wallet.png)
 
-
 # x402-wallet
 
-A command-line wallet for the [x402 payment protocol](https://x402.org). Create cryptographic payment authorizations for pay-per-use APIs that use the x402 payment protocol.
+![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)
+![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
+![x402](https://img.shields.io/badge/x402-v1%20%22exact%22-purple)
+![Networks](https://img.shields.io/badge/Networks-Ethereum%20%7C%20Base%20%7C%20Base%20Sepolia-blue)
 
-## Features
+A command-line wallet for the [x402 payment protocol](https://x402.org). It creates cryptographic payment authorizations (EIP-3009 signatures) for pay-per-use APIs and manages basic EVM wallet operations — designed to be driven by AI coding agents like Claude Code or Gemini.
 
-- **X402 payments** - Create EIP-3009 payment signatures for x402-protected APIs and resources
-- **Multi-network** - Supports Ethereum, Base, and Base Sepolia
-- **Secure storage** - Encrypted keystore or `.env` file
-- **Full wallet** - Check balances, send ETH/ERC20 tokens
-- **LLM-friendly** - Designed for use by AI coding agents (Claude Code, Gemini etc)
-
---- 
-
-⚠️ **ACTIVE DEVELOPMENT - USE AT YOUR OWN RISK**
-
-This software is under active development and may contain bugs or experience breaking changes. **No warranty is provided.** You are solely responsible for the security of your private keys and any loss of funds.
-
-**Security Warnings:**
-- Private keys are stored locally on your machine (either in `.env` or encrypted keystore)
-- If your machine is compromised, your funds may be stolen
-- Always use a dedicated wallet with **minimal funds** for testing
-- **Never** store large amounts of crypto in CLI wallets
-- Review the code yourself before trusting it with real funds
-- The EIP-3009 payment signatures authorize token transfers - treat them like signed checks
-
-**Recommendations:**
-- Use a fresh wallet with only small amounts ($1-10 USD)
-- Review source code before running
-- Test on Base Sepolia testnet first
-- Do NOT use your main wallet or seed phrase
-- Do NOT store significant funds in this wallet
-
-**If you are unsure about the security implications, do not use this software.**
+> **Fork notice:** This is a fork of [0xKoda/x402-wallet](https://github.com/0xKoda/x402-wallet), restructured and adapted for independent development. All credit for the original implementation goes to the upstream authors.
 
 ---
 
+> ### Kurzübersicht (DE)
+>
+> **x402-wallet** ist ein Kommandozeilen-Wallet für das [x402-Zahlungsprotokoll](https://x402.org). Es erzeugt EIP-3009-Signaturen (gaslose USDC-Überweisungen) und sendet sie als Base64-kodierter `X-PAYMENT`-Header mit — für APIs, die per Abruf bezahlt werden (Pay-per-Use).
+>
+> - **Netzwerke:** Ethereum, Base (Standard) und Base Sepolia (Testnet)
+> - **Schlüsselspeicher:** `.env`-Datei (Klartext, automationsfreundlich) oder verschlüsselter Keystore (XChaCha20-Poly1305 + Argon2)
+> - **Zusatzfunktionen:** ETH-/ERC20-Guthaben abfragen, ETH/Token versenden
+> - **Ausgelegt für KI-Agents** (Claude Code, Gemini etc.): saubere Stdout-Ausgaben, keine Passwort-Prompts nötig
+>
+> ⚠️ **Sicherheit:** Nur ein dediziertes Wallet mit kleinen Beträgen ($1–10) verwenden, niemals das Haupt-Wallet oder Seed-Phrase. Erst auf Base Sepolia testen. Software ist in aktiver Entwicklung, ohne Garantie.
+
+---
+
+## ⚠️ Active Development — Use at Your Own Risk
+
+This software may contain bugs and experience breaking changes. **No warranty is provided.** You are solely responsible for the security of your private keys and any loss of funds.
+
+- Private keys are stored locally (`.env` plaintext or encrypted keystore) — a compromised machine means stolen funds
+- EIP-3009 signatures authorize token transfers and **cannot be revoked once signed** — treat them like signed checks
+- Use a dedicated wallet with **minimal funds** ($1–10 USDC); never your main wallet or seed phrase
+- Test on Base Sepolia first; review the code before trusting it with real funds
+
+## Features
+
+- **x402 payments** — create EIP-3009 payment signatures for x402-protected APIs (`X-PAYMENT` header, Base64-encoded)
+- **Multi-network** — Ethereum, Base (default), Base Sepolia, with custom RPC support
+- **Two key-storage modes** — automation-friendly `.env` file or encrypted keystore (XChaCha20-Poly1305 + Argon2)
+- **Wallet operations** — check ETH/ERC20 balances, send ETH and ERC20 tokens
+- **Agent-friendly** — clean stdout output on every command, designed for LLM coding agents
+
 ## Quick Start
 
-### Installation
+### Install
 
-    git clone https://github.com/0xkoda/x402-wallet
-    cd x402-wallet
-    cargo build --release
+```
+git clone https://github.com/wurminator/x402-wallet
+cd x402-wallet
+cargo build --release
+```
 
-The binary will be at `./target/release/x402-wallet` or you can add it to your path. 
+The binary is at `./target/release/x402-wallet` (add it to your `PATH` if you like).
 
-To give the LLM context about x402-wallet, it is recommended you reference [wallet.md](https://github.com/0xKoda/x402-wallet/blob/main/wallet.md) or add your own.
+> Optional experimental feature (currently **not wired up** in the code, only declared in `Cargo.toml`): `cargo build --release --features mcp`
 
-You should also give your agent access to a list of resources, you can use [resource-list.md](https://github.com/0xKoda/x402-wallet/blob/main/resource-list.md) or add your own. 
+### Set up a key
 
-### Setup
+Pick one of two storage modes:
 
-**IMPORTANT: Choose your storage method**
+| | `.env` file (default) | Encrypted keystore |
+|---|---|---|
+| Command | `x402-wallet wallet-init` | `x402-wallet wallet-init --keystore` |
+| Storage | `X402_WALLET_PRIVATE_KEY` in `./.env` (plaintext) | `~/.x402wallet/keystore.json` (encrypted) |
+| Password prompt | None — works in scripts and agents | Every command prompts for the passphrase |
+| Suitability | Automation, AI agents, testing, minimal funds | Manual/interactive use only |
 
-You have two options for storing your private key:
+Both modes ask `Create new private key (y/N)?` — `y` generates a fresh key, `N` imports an existing one (`0x…` or bare hex, input hidden). The wallet address is printed on success.
 
-#### Option A: `.env` file (Recommended for Automation/AI Agents)
+### Fund the wallet
 
-**Pros:**
-- No password prompts
-- Works seamlessly with AI coding agents (Claude Code, Gemini Code Assist, etc.)
-- Simple and fast
+1. Get your address: `x402-wallet wallet-address`
+2. Send a small amount of USDC on Base to that address ($1–10 recommended)
+3. Verify: `x402-wallet balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (native USDC on Base)
 
-**Cons:**
-- Private key stored in plaintext (protected by file permissions only)
-- If someone gains access to your `.env` file, they have your key
-
-**How to use:**
-
-    # Initialize wallet (creates .env file)
-    ./target/release/x402-wallet wallet-init
-
-At the prompt `Create new private key (y/N)?`:
-- Press `y` to generate a new random private key
-- Press `N` to import your own existing private key (you'll be prompted to paste it)
-
-**When to use:**
-- AI agent automation (Claude Code, Gemini, etc.)
-- Scripts and programmatic access
-- Testing and development
-- Wallets with minimal funds only
-
-#### Option B: Encrypted keystore (More Secure, Manual Use Only)
-
-**Pros:**
-- Private key encrypted with your password (XChaCha20-Poly1305 + Argon2)
-- Safer if your filesystem is compromised
-
-**Cons:**
-- **Blocks automation** - prompts for password on every command
-- **Breaks AI agent workflows** - agents cannot enter passwords interactively
-- Slower (password derivation takes ~100ms)
-
-**How to use:**
-
-    # Initialize with encrypted keystore
-    ./target/release/x402-wallet wallet-init --keystore
-
-At the prompt `Create new private key (y/N)?`:
-- Press `y` to generate a new random private key
-- Press `N` to import your own existing private key (you'll be prompted to paste it)
-
-Set a strong passphrase when prompted. Every command will then ask for your password:
-
-    # Every command will ask for password
-    ./target/release/x402-wallet wallet-address
-    # (prompts: "Unlock keystore passphrase:")
-
-**When to use:**
-- Manual/interactive use only
-- When you want password-protected keys
-- **NOT for AI agents** - they cannot enter passwords
-- **NOT for automation** - scripts will hang on password prompt
-
-### Fund Your Wallet
-
-**Option 1: Generate a new wallet and fund it**
-
-1. Initialize wallet (see Setup above)
-
-2. Get your wallet address:
-
-       ./target/release/x402-wallet wallet-address
-
-3. Send USDC to that address on Base mainnet (use a small amount, $1-10 recommended)
-
-4. Check your balance:
-
-       ./target/release/x402-wallet balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-
-**Option 2: Import an existing wallet with funds**
-
-1. Run wallet init:
-
-       ./target/release/x402-wallet wallet-init
-
-2. When prompted `Create new private key (y/N)?`, press `N`
-
-3. Paste your existing private key when prompted (format: `0x...` or just the hex string)
-
-4. The wallet will use your existing address and funds
-
-5. Verify it worked:
-
-       ./target/release/x402-wallet wallet-address
-       ./target/release/x402-wallet balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-
-**IMPORTANT:** Only import a private key for a wallet with minimal funds. Never use your main wallet.
+Alternatively, import an existing key with minimal funds during `wallet-init`.
 
 ## Usage
 
-**Note: the CLI works best with a good prompt. Ensure you have a file like [wallet.md](https://github.com/0xKoda/x402-wallet/blob/main/wallet.md) that clearly explains to the agent how to use the wallet**
+For smooth agent operation, give the LLM context: reference [wallet.md](wallet.md) for detailed instructions and [resource-list.md](resource-list.md) for the list of payable resources.
 
-### X402 Payments
+### Pay for an x402-protected API
 
-Pay for an x402-protected API:
+```
+# 1. Request the resource — server answers 402 Payment Required
+curl -X POST https://api.example.com/endpoint
 
-    # 1. Make initial request to get payment requirements
-    curl -X POST https://api.example.com/endpoint
+# 2. Create the payment signature from the 402 response fields
+#    payTo -> --pay-to, asset -> --token, maxAmountRequired -> --amount
+x402-wallet create-payment \
+  --pay-to 0xRECIPIENT_ADDRESS \
+  --token 0xUSDC_ADDRESS \
+  --amount 10000 \
+  --token-name "USD Coin" \
+  --token-version "2" > payment.txt
 
-    # Response: 402 Payment Required with details
+# 3. Retry with the payment header
+curl -X POST \
+  -H "X-PAYMENT: $(cat payment.txt)" \
+  https://api.example.com/endpoint
+```
 
-    # 2. Create payment signature (save to file)
-    ./target/release/x402-wallet create-payment \
-      --pay-to 0xRECIPIENT_ADDRESS \
-      --token 0xUSDC_ADDRESS \
-      --amount 10000 \
-      --token-name "USD Coin" \
-      --token-version "2" > payment.txt
+`create-payment` writes **only** the Base64 header to stdout — no extra text — so it can be captured directly in scripts.
 
-    # 3. Retry request with payment header
-    curl -X POST \
-      -H "X-PAYMENT: $(cat payment.txt)" \
-      https://api.example.com/endpoint
+### Wallet operations
 
-### Wallet Operations
+```
+# Balances (ETH, or any ERC20 token)
+x402-wallet balance
+x402-wallet balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 
-**Check balances:**
-
-    # ETH balance
-    ./target/release/x402-wallet balance
-
-    # USDC balance (Base mainnet)
-    ./target/release/x402-wallet balance --erc20 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-
-**Send ETH:**
-
-    ./target/release/x402-wallet send-eth \
-      --to 0xRECIPIENT \
-      --eth 0.1
-
-**Send USDC:**
-
-    ./target/release/x402-wallet send-erc20 \
-      --token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
-      --to 0xRECIPIENT \
-      --amount 10.5
-
-## Architecture
-
-This wallet implements the **"exact"** payment scheme from x402 using **EIP-3009** (gasless USDC transfers). It creates cryptographic signatures that authorize token transfers without requiring an on-chain transaction from the payer.
-
-**Key components:**
-- `create-payment` command - Signs EIP-712 typed data for EIP-3009 authorization
-- Payment validity: 10 minutes from creation
-- Output: Base64-encoded `X-PAYMENT` header
-
-## Configuration
-
-Config stored in `~/.x402wallet/config.json`:
-
-    {
-      "network": "base",
-      "rpc": {
-        "ethereum": "https://cloudflare-eth.com",
-        "base": "https://mainnet.base.org",
-        "base-sepolia": "https://sepolia.base.org"
-      }
-    }
-
-Change networks:
-
-    ./target/release/x402-wallet config-set --network base
-
-## Security
-
-### Private Key Storage
-
-**`.env` file method:**
-- Stored in plaintext at `./.env`
-- File permissions set to `0600` (owner read/write only) on Unix
-- Vulnerable if attacker gains filesystem access
-- Environment variable: `X402_WALLET_PRIVATE_KEY`
-
-**Keystore method:**
-- Stored encrypted at `~/.x402wallet/keystore.json`
-- Encryption: XChaCha20-Poly1305 authenticated encryption
-- Key derivation: Argon2 (memory-hard, resistant to GPU attacks)
-- Only decrypted in memory when needed, then zeroized
-- Still vulnerable if attacker has keylogger or memory access
-
-### Payment Security
-
-- **Payments are time-limited** - expire after 10 minutes
-- **Payments are stateless** - no funds locked or at risk if header is intercepted
-- **No gas fees for payer** - recipient executes the transfer using your signature
-- **Once signed, cannot be revoked** - treat like a signed check
-
-### Best Practices
-
-1. **Use minimal funds** - Only keep what you need for immediate payments
-2. **Separate wallets** - Don't reuse wallets from other applications
-3. **Test on testnets first** - Use Base Sepolia before mainnet
-4. **Review transactions** - Understand what you're signing
-5. **Keep software updated** - Pull latest changes regularly
-6. **Secure your machine** - Use full-disk encryption, strong passwords, etc.
-
-## Supported Networks
-
-| Network | Chain ID | Default RPC |
-|---------|----------|-------------|
-| Ethereum | 1 | `https://cloudflare-eth.com` |
-| Base | 8453 | `https://mainnet.base.org` |
-| Base Sepolia | 84532 | `https://sepolia.base.org` |
-
-## Use with AI Agents
-
-This wallet is designed for use by LLM coding agents (Claude Code, Gemini Code Assist, etc.).
-
-**IMPORTANT:** AI agents **cannot use the encrypted keystore** because they cannot enter passwords interactively. Always use the `.env` method for agent workflows.
-
-See `wallet.md` for detailed agent instructions.
-
-**Example workflow:**
-1. You prompt the agent which requires it use some external x402 resource
-2. Agent makes HTTP request → gets 402 Payment Required
-3. Agent parses payment details from response
-4. Agent calls `x402-wallet create-payment` with parsed params
-5. Agent retries HTTP request with `X-PAYMENT` header
-
+# Send funds
+x402-wallet send-eth  --to 0xRECIPIENT --eth 0.1
+x402-wallet send-erc20 --token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 --to 0xRECIPIENT --amount 10.5
+```
 
 ## Commands Reference
 
-    wallet-init               Initialize new wallet
-      --keystore              Use encrypted keystore (breaks automation)
-      --dotenv PATH           Use .env file at PATH (default: ./.env)
+```
+wallet-init               Initialize a wallet (create or import a private key)
+  --keystore              Use encrypted keystore (breaks automation)
+  --dotenv PATH           Use .env file at PATH (default: ./.env)
 
-    wallet-address            Display wallet address
+wallet-address            Display wallet address
 
-    config-set                Configure network
-      --network NAME          Network: ethereum, base, base-sepolia
-      --rpc URL               Custom RPC endpoint (optional)
+config-set                Configure network
+  --network NAME          ethereum | base | base-sepolia (aliases: eth, base_sepolia)
+  --rpc URL               Custom RPC endpoint (optional)
 
-    balance                   Check balance
-      --erc20 ADDRESS         Token address (omit for ETH)
+balance                   Check balance (raw amount on stdout)
+  --erc20 ADDRESS         Token address (omit for ETH)
 
-    send-eth                  Send ETH
-      --to ADDRESS            Recipient
-      --eth AMOUNT            Amount in ETH
+send-eth                  Send ETH
+  --to ADDRESS            Recipient
+  --eth AMOUNT            Amount in ETH (e.g. "0.1")
 
-    send-erc20                Send ERC20 tokens
-      --token ADDRESS         Token contract
-      --to ADDRESS            Recipient
-      --amount AMOUNT         Amount in token units
+send-erc20                Send ERC20 tokens
+  --token ADDRESS         Token contract
+  --to ADDRESS            Recipient
+  --amount AMOUNT         Amount in token units (e.g. "10.5")
 
-    create-payment            Create x402 payment signature
-      --pay-to ADDRESS        Recipient (from 402 response)
-      --token ADDRESS         Token contract (from 402 response)
-      --amount UNITS          Amount in smallest units (from 402 response)
-      --token-name NAME       Token name for EIP-712 (optional)
-      --token-version VER     Token version for EIP-712 (optional)
+create-payment            Create x402 payment signature (Base64 X-PAYMENT header on stdout)
+  --pay-to ADDRESS        Recipient (from 402 response: accepts[0].payTo)
+  --token ADDRESS         Token contract (accepts[0].asset)
+  --amount UNITS          Amount in smallest units (accepts[0].maxAmountRequired)
+  --token-name NAME       EIP-712 domain name (accepts[0].extra.name; default: "USD Coin")
+  --token-version VER     EIP-712 domain version (accepts[0].extra.version; default: "2")
+```
+
+## How It Works
+
+The wallet implements the **"exact"** x402 scheme using **[EIP-3009](https://eips.ethereum.org/EIPS/eip-3009)** (`TransferWithAuthorization`):
+
+1. `create-payment` builds an EIP-712 typed-data message (payer, recipient, amount, 32-byte random nonce, validity window) and signs it with your key
+2. The signature is packed into a payment payload (`x402Version: 1`, scheme `exact`) and Base64-encoded as the `X-PAYMENT` header
+3. The recipient redeems the authorization on-chain — **you pay no gas**; the transfer is executed by the payee using your signature
+
+Payments are **time-limited** (10 minutes), **stateless** (no funds locked if the header is intercepted), and **non-revocable** once signed.
+
+## Configuration
+
+Stored at `~/.x402wallet/config.json` (Windows: `%USERPROFILE%\.x402wallet\config.json`):
+
+```json
+{
+  "network": "base",
+  "rpc": {
+    "ethereum": "https://cloudflare-eth.com",
+    "base": "https://mainnet.base.org",
+    "base-sepolia": "https://sepolia.base.org"
+  }
+}
+```
+
+| Network | Chain ID | Default RPC | Aliases |
+|---------|----------|-------------|---------|
+| Ethereum | 1 | `https://cloudflare-eth.com` | `eth` |
+| Base *(default)* | 8453 | `https://mainnet.base.org` | — |
+| Base Sepolia | 84532 | `https://sepolia.base.org` | `base_sepolia`, `base-sepolia-testnet` |
+
+```
+x402-wallet config-set --network base-sepolia
+x402-wallet config-set --network base --rpc https://your-rpc.example
+```
+
+The provider verifies that the RPC's chain ID matches the configured network on every request.
+
+## Security
+
+**Key storage:**
+
+- `.env` mode: plaintext key in `./.env`, file permissions set to `0600` on Unix (newly created files only); readable by anything with filesystem access
+- Keystore mode: `~/.x402wallet/keystore.json`, encrypted with XChaCha20-Poly1305, key derived via Argon2 (memory-hard); passphrase is zeroized after use; still vulnerable to keyloggers or memory access
+
+**Best practices:**
+
+1. Keep only minimal funds in this wallet
+2. Use a dedicated wallet — don't reuse keys from other applications
+3. Test on Base Sepolia before mainnet
+4. Understand what you sign — payment authorizations are like signed checks
+5. Secure your machine (full-disk encryption, strong passwords)
+
+## Use with AI Agents
+
+The CLI is designed for LLM coding agents (Claude Code, Gemini Code Assist, …):
+
+- Agents **must use the `.env` method** — they cannot answer keystore passphrase prompts
+- `balance` and `create-payment` print bare values (script-friendly); transfers print a labeled transaction hash
+- Give the agent [wallet.md](wallet.md) as usage context and [resource-list.md](resource-list.md) as its list of payable resources
+
+Typical flow: agent hits a 402 → parses `accepts[0]` from the response → runs `create-payment` → retries the request with the `X-PAYMENT` header.
 
 ## Troubleshooting
 
-**"RPC chain ID mismatch"**  
-Your configured network doesn't match the RPC endpoint. Set correct network:
-
-    ./target/release/x402-wallet config-set --network base
-
-**"No private key found"**  
-Initialize wallet first:
-
-    ./target/release/x402-wallet wallet-init
-
-**"Unlock keystore passphrase:" prompt blocks my script/agent**  
-You're using encrypted keystore mode. For automation, use `.env` method instead:
-
-    # Remove keystore
-    rm ~/.x402wallet/keystore.json
-    
-    # Reinitialize with .env
-    ./target/release/x402-wallet wallet-init
-    export $(cat .env | xargs)
-
-**"Transaction dropped"**  
-Insufficient ETH for gas or network congestion. Check ETH balance:
-
-    ./target/release/x402-wallet balance
-
-**Payment authorization fails**  
-Ensure you're using correct `--token-name` and `--token-version` from the 402 response `extra` fields.
-
+| Problem | Fix |
+|---------|-----|
+| `RPC chain ID mismatch` | `config-set --network <name>` with the matching network, or set a correct `--rpc` |
+| `No private key` | Run `wallet-init`, or set `X402_WALLET_PRIVATE_KEY` in `.env` |
+| `Unlock keystore passphrase:` blocks script/agent | Delete `~/.x402wallet/keystore.json` and re-run `wallet-init` (`.env` mode) |
+| `transaction dropped from mempool` | Usually insufficient ETH for gas — check `balance` |
+| Payment authorization rejected | `--token-name`/`--token-version` must match the 402 response `extra` fields exactly |
 
 ## Contributing
 
-Contributions welcome! Please:
-1. Fork the repository
+Contributions are welcome!
+
+1. Fork this repository
 2. Create a feature branch
 3. Make your changes with tests
 4. Submit a pull request
 
-By contributing, you agree to license.
+By contributing, you agree to license your contributions under AGPL-3.0.
 
 ## License
 
-**AGPL-3.0** - This software is licensed under the GNU Affero General Public License v3.0.
-
-**Why AGPL?** This ensures that if companies build services using this wallet, they contribute back to the community by open-sourcing their code. If you want to use this commercially without open-sourcing, please contact us for licensing options.
+**AGPL-3.0** — see [LICENSE](LICENSE). This ensures services built on this wallet contribute back by open-sourcing their code; contact the maintainers for commercial licensing options.
 
 ## Disclaimer
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-**You are solely responsible for:**
-- Securing your private keys
-- Any loss of funds
-- Understanding the code before using it
-- Complying with applicable laws and regulations
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY. You are solely responsible for securing your private keys, any loss of funds, and complying with applicable laws.
 
 ## Links
 
-- [X402 Protocol](https://x402.org)
-- [X402 Documentation](https://x402.gitbook.io/x402)
+- [Upstream repository (0xKoda/x402-wallet)](https://github.com/0xKoda/x402-wallet)
+- [X402 Protocol](https://x402.org) · [X402 Documentation](https://x402.gitbook.io/x402)
 - [EIP-3009 Specification](https://eips.ethereum.org/EIPS/eip-3009)
-- [Recaipe API](https://app.recaipe.com) - Example x402-protected service
+- [Recaipe API](https://app.recaipe.com) — example x402-protected service
 - [AGPL-3.0 License](https://www.gnu.org/licenses/agpl-3.0.en.html)
-
-## Support
-
-- GitHub Issues: https://github.com/0xkoda/x402-wallet/issues
 
 ---
 
-**Built for the x402 ecosystem** - Making APIs payable with crypto, one request at a time.
+**Built for the x402 ecosystem** — making APIs payable with crypto, one request at a time.
