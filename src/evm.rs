@@ -96,6 +96,17 @@ pub async fn chain_id() -> Result<u64> {
     })
 }
 
+/// Returns the CAIP-2 network identifier used by x402 v2 (e.g. "eip155:8453")
+pub fn caip2_for_network(name: &str) -> Result<String> {
+    Ok(match name {
+        "ethereum" => "eip155:1",
+        "base" => "eip155:8453",
+        "base-sepolia" => "eip155:84532",
+        other => return Err(anyhow!("unknown network: {}", other)),
+    }
+    .to_string())
+}
+
 /// Create HTTP provider for configured network (validates chain ID)
 pub async fn http_provider() -> Result<Provider<Http>> {
     let cfg = load_network().await?;

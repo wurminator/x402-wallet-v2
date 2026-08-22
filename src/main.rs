@@ -79,7 +79,7 @@ enum Cmd {
         amount: String,
     },
 
-    /// Create x402 payment signature (outputs base64-encoded X-PAYMENT header)
+    /// Create x402 payment signature (outputs base64-encoded X-PAYMENT / PAYMENT-SIGNATURE header)
     CreatePayment {
         /// Recipient address (from 402 response: accepts[0].payTo)
         #[arg(long)]
@@ -87,7 +87,7 @@ enum Cmd {
         /// Token contract address (from 402 response: accepts[0].asset)
         #[arg(long)]
         token: String,
-        /// Amount in smallest units (from 402 response: accepts[0].maxAmountRequired)
+        /// Amount in smallest units (v1: accepts[0].maxAmountRequired, v2: accepts[0].amount)
         #[arg(long)]
         amount: String,
         /// Token name for EIP-712 signing (from 402 response: accepts[0].extra.name)
@@ -96,6 +96,16 @@ enum Cmd {
         /// Token version for EIP-712 signing (from 402 response: accepts[0].extra.version)
         #[arg(long)]
         token_version: Option<String>,
+        /// Emit x402 v2 payload for the PAYMENT-SIGNATURE header (default: v1 for X-PAYMENT)
+        #[arg(long)]
+        v2: bool,
+        /// Resource URL embedded in the v2 payload (optional, v2 only)
+        #[arg(long)]
+        resource_url: Option<String>,
+        /// maxTimeoutSeconds echoed in v2 accepted requirements
+        /// (from 402 response: accepts[0].maxTimeoutSeconds, v2 only, default: 600)
+        #[arg(long)]
+        max_timeout_seconds: Option<u64>,
     },
 }
 
@@ -159,6 +169,9 @@ async fn main() -> Result<()> {
             amount,
             token_name,
             token_version,
+            v2,
+            resource_url,
+            max_timeout_seconds,
         } => {
             let ctx = store::load_wallet_context().await?;
             let client = evm::provider_with_wallet(ctx.wallet.clone()).await?;
@@ -171,6 +184,9 @@ async fn main() -> Result<()> {
                 &amount,
                 token_name.as_deref(),
                 token_version.as_deref(),
+                v2,
+                resource_url.as_deref(),
+                max_timeout_seconds,
             )
             .await?;
 

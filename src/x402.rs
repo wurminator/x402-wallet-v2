@@ -15,13 +15,53 @@ use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// X402 payment header structure
+/// X402 v1 payment header structure (X-PAYMENT)
 #[derive(Debug, Serialize)]
 struct PaymentPayload {
     x402Version: u32,
     scheme: String,
     network: String,
     payload: serde_json::Value,
+}
+
+/// X402 v2 payment header structure (PAYMENT-SIGNATURE)
+#[derive(Debug, Serialize)]
+struct PaymentPayloadV2 {
+    x402Version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resource: Option<ResourceInfo>,
+    accepted: AcceptedRequirements,
+    payload: serde_json::Value,
+}
+
+/// X402 v2 resource description (echoed in the payment payload)
+#[derive(Debug, Serialize)]
+struct ResourceInfo {
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mimeType: Option<String>,
+}
+
+/// X402 v2 accepted payment requirements (echoed from the 402 response)
+#[derive(Debug, Serialize)]
+struct AcceptedRequirements {
+    scheme: String,
+    /// CAIP-2 network identifier (e.g. "eip155:8453")
+    network: String,
+    amount: String,
+    asset: String,
+    payTo: String,
+    maxTimeoutSeconds: u64,
+    extra: TokenExtra,
+}
+
+/// EIP-712 domain parameters of the token (required for eip3009)
+#[derive(Debug, Serialize)]
+struct TokenExtra {
+    name: String,
+    version: String,
 }
 
 /// EIP-3009 exact payment payload
@@ -52,9 +92,14 @@ struct Authorization {
 /// * `amount` - Amount in smallest units (from 402 response)
 /// * `token_name` - Token name for EIP-712 domain (optional, defaults to "USD Coin")
 /// * `token_version` - Token version for EIP-712 domain (optional, defaults to "2")
+/// * `v2` - Emit an x402 v2 payload (PAYMENT-SIGNATURE header) instead of v1 (X-PAYMENT)
+/// * `resource_url` - Resource URL embedded in the v2 payload (optional)
+/// * `max_timeout_seconds` - maxTimeoutSeconds echoed in v2 accepted requirements
+///   (from 402 response `accepts[0].maxTimeoutSeconds`, defaults to 600)
 ///
 /// # Returns
-/// Base64-encoded X-PAYMENT header value
+/// Base64-encoded X-PAYMENT (v1) or PAYMENT-SIGNATURE (v2) header value
+#[allow(clippy::too_many_arguments)]
 pub async fn create_payment(
     client: std::sync::Arc<
         SignerMiddleware<
@@ -68,6 +113,9 @@ pub async fn create_payment(
     amount: &str,
     token_name: Option<&str>,
     token_version: Option<&str>,
+    v2: bool,
+    resource_url: Option<&str>,
+    max_timeout_seconds: Option<u64>,
 ) -> Result<String> {
     // Parse addresses and amount
     let chain_id = client.get_chainid().await?.as_u64();
@@ -148,11 +196,37 @@ pub async fn create_payment(
     let network = cfg.network.clone();
 
     // Build x402 payment header
-    let payment_header = PaymentPayload {
-        x402Version: 1,
-        scheme: "exact".to_string(),
-        network,
-        payload: serde_json::to_value(payload)?,
+    let payment_header = if v2 {
+        // v2: CAIP-2 network, resource info and echoed payment requirements
+        serde_json::to_value(PaymentPayloadV2 {
+            x402Version: 2,
+            resource: resource_url.map(|url| ResourceInfo {
+                url: url.to_string(),
+                description: None,
+                mimeType: None,
+            }),
+            accepted: AcceptedRequirements {
+                scheme: "exact".to_string(),
+                network: crate::evm::caip2_for_network(&network)?,
+                amount: value.to_string(),
+                asset: format!("{:#x}", token),
+                payTo: format!("{:#x}", pay_to),
+                maxTimeoutSeconds: max_timeout_seconds.unwrap_or(600),
+                extra: TokenExtra {
+                    name: token_name.to_string(),
+                    version: token_version.to_string(),
+                },
+            },
+            payload: serde_json::to_value(payload)?,
+        })?
+    } else {
+        // v1: legacy envelope with plain network name
+        serde_json::to_value(PaymentPayload {
+            x402Version: 1,
+            scheme: "exact".to_string(),
+            network,
+            payload: serde_json::to_value(payload)?,
+        })?
     };
 
     // Encode as base64

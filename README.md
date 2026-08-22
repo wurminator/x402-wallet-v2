@@ -4,12 +4,12 @@
 
 ![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
-![x402](https://img.shields.io/badge/x402-v1%20%22exact%22-purple)
+![x402](https://img.shields.io/badge/x402-v1%20%7C%20v2%20%22exact%22-purple)
 ![Networks](https://img.shields.io/badge/Networks-Ethereum%20%7C%20Base%20%7C%20Base%20Sepolia-blue)
 
 A command-line wallet for the [x402 payment protocol](https://x402.org). It creates cryptographic payment authorizations (EIP-3009 signatures) for pay-per-use APIs and manages basic EVM wallet operations — designed to be driven by AI coding agents like Claude Code or Gemini.
 
-> **Fork notice:** This is a fork of [0xKoda/x402-wallet](https://github.com/0xKoda/x402-wallet), restructured and adapted for independent development. All credit for the original implementation goes to the upstream authors.
+> **Fork notice:** This is a fork of [0xKoda/x402-wallet](https://github.com/0xKoda/x402-wallet). In addition to the original x402 **v1** protocol (`X-PAYMENT` header), this fork also supports x402 **v2** (`PAYMENT-SIGNATURE` header, CAIP-2 network identifiers) — see [Usage](#usage). All credit for the original implementation goes to the upstream authors.
 
 ---
 
@@ -17,6 +17,7 @@ A command-line wallet for the [x402 payment protocol](https://x402.org). It crea
 >
 > **x402-wallet** ist ein Kommandozeilen-Wallet für das [x402-Zahlungsprotokoll](https://x402.org). Es erzeugt EIP-3009-Signaturen (gaslose USDC-Überweisungen) und sendet sie als Base64-kodierter `X-PAYMENT`-Header mit — für APIs, die per Abruf bezahlt werden (Pay-per-Use).
 >
+> - **x402 v1 und v2:** erzeugt Zahlungs-Header für `X-PAYMENT` (v1) und `PAYMENT-SIGNATURE` (v2, CAIP-2-Netzwerk-IDs)
 > - **Netzwerke:** Ethereum, Base (Standard) und Base Sepolia (Testnet)
 > - **Schlüsselspeicher:** `.env`-Datei (Klartext, automationsfreundlich) oder verschlüsselter Keystore (XChaCha20-Poly1305 + Argon2)
 > - **Zusatzfunktionen:** ETH-/ERC20-Guthaben abfragen, ETH/Token versenden
@@ -37,7 +38,7 @@ This software may contain bugs and experience breaking changes. **No warranty is
 
 ## Features
 
-- **x402 payments** — create EIP-3009 payment signatures for x402-protected APIs (`X-PAYMENT` header, Base64-encoded)
+- **x402 payments (v1 & v2)** — create EIP-3009 payment signatures for x402-protected APIs, as v1 `X-PAYMENT` or v2 `PAYMENT-SIGNATURE` header (both Base64-encoded)
 - **Multi-network** — Ethereum, Base (default), Base Sepolia, with custom RPC support
 - **Two key-storage modes** — automation-friendly `.env` file or encrypted keystore (XChaCha20-Poly1305 + Argon2)
 - **Wallet operations** — check ETH/ERC20 balances, send ETH and ERC20 tokens
@@ -48,8 +49,8 @@ This software may contain bugs and experience breaking changes. **No warranty is
 ### Install
 
 ```
-git clone https://github.com/wurminator/x402-wallet
-cd x402-wallet
+git clone https://github.com/wurminator/x402-wallet-v2
+cd x402-wallet-v2
 cargo build --release
 ```
 
@@ -82,7 +83,7 @@ Alternatively, import an existing key with minimal funds during `wallet-init`.
 
 For smooth agent operation, give the LLM context: reference [wallet.md](wallet.md) for detailed instructions and [resource-list.md](resource-list.md) for the list of payable resources.
 
-### Pay for an x402-protected API
+### Pay for an x402-protected API (v1, default)
 
 ```
 # 1. Request the resource — server answers 402 Payment Required
@@ -102,6 +103,32 @@ curl -X POST \
   -H "X-PAYMENT: $(cat payment.txt)" \
   https://api.example.com/endpoint
 ```
+
+### Pay for an x402-protected API (v2)
+
+v2 servers send their payment requirements Base64-encoded in the `PAYMENT-REQUIRED` response header (instead of the response body) and expect the payment in the `PAYMENT-SIGNATURE` header. Decode the header, read `accepts[0]`, and add `--v2`:
+
+```
+# 1. Request the resource — server answers 402 with a PAYMENT-REQUIRED header
+#    (Base64 JSON; field mapping: payTo -> --pay-to, asset -> --token,
+#     amount -> --amount, maxTimeoutSeconds -> --max-timeout-seconds)
+x402-wallet create-payment \
+  --v2 \
+  --resource-url https://api.example.com/endpoint \
+  --pay-to 0xRECIPIENT_ADDRESS \
+  --token 0xUSDC_ADDRESS \
+  --amount 10000 \
+  --max-timeout-seconds 60 \
+  --token-name "USDC" \
+  --token-version "2" > payment.txt
+
+# 2. Retry with the v2 payment header
+curl -X POST \
+  -H "PAYMENT-SIGNATURE: $(cat payment.txt)" \
+  https://api.example.com/endpoint
+```
+
+`--v2` switches the emitted payload to the v2 envelope: `x402Version: 2`, CAIP-2 network identifier (e.g. `eip155:8453`), an optional `resource` object, and the accepted payment requirements echoed from the 402 response. The EIP-3009 signature itself is identical in v1 and v2.
 
 `create-payment` writes **only** the Base64 header to stdout — no extra text — so it can be captured directly in scripts.
 
@@ -142,12 +169,16 @@ send-erc20                Send ERC20 tokens
   --to ADDRESS            Recipient
   --amount AMOUNT         Amount in token units (e.g. "10.5")
 
-create-payment            Create x402 payment signature (Base64 X-PAYMENT header on stdout)
+create-payment            Create x402 payment signature (Base64 X-PAYMENT / PAYMENT-SIGNATURE header on stdout)
   --pay-to ADDRESS        Recipient (from 402 response: accepts[0].payTo)
   --token ADDRESS         Token contract (accepts[0].asset)
-  --amount UNITS          Amount in smallest units (accepts[0].maxAmountRequired)
+  --amount UNITS          Amount in smallest units (v1: accepts[0].maxAmountRequired, v2: accepts[0].amount)
   --token-name NAME       EIP-712 domain name (accepts[0].extra.name; default: "USD Coin")
   --token-version VER     EIP-712 domain version (accepts[0].extra.version; default: "2")
+  --v2                    Emit x402 v2 payload for the PAYMENT-SIGNATURE header (default: v1 for X-PAYMENT)
+  --resource-url URL      Resource URL embedded in the v2 payload (optional, v2 only)
+  --max-timeout-seconds N maxTimeoutSeconds echoed in v2 accepted requirements
+                          (accepts[0].maxTimeoutSeconds, v2 only, default: 600)
 ```
 
 ## How It Works
@@ -155,8 +186,10 @@ create-payment            Create x402 payment signature (Base64 X-PAYMENT header
 The wallet implements the **"exact"** x402 scheme using **[EIP-3009](https://eips.ethereum.org/EIPS/eip-3009)** (`TransferWithAuthorization`):
 
 1. `create-payment` builds an EIP-712 typed-data message (payer, recipient, amount, 32-byte random nonce, validity window) and signs it with your key
-2. The signature is packed into a payment payload (`x402Version: 1`, scheme `exact`) and Base64-encoded as the `X-PAYMENT` header
+2. The signature is packed into a payment payload and Base64-encoded as the payment header — `X-PAYMENT` (v1, default) or `PAYMENT-SIGNATURE` (v2 via `--v2`)
 3. The recipient redeems the authorization on-chain — **you pay no gas**; the transfer is executed by the payee using your signature
+
+The EIP-3009 signature is identical for both protocol versions; they differ only in the surrounding envelope. v1 uses `{x402Version: 1, scheme, network, payload}` with a plain network name (`base`). v2 uses `x402Version: 2`, CAIP-2 network identifiers (`eip155:8453`), an optional `resource` object, and echoes the accepted payment requirements from the 402 response (`PAYMENT-REQUIRED` header, Base64-encoded).
 
 Payments are **time-limited** (10 minutes), **stateless** (no funds locked if the header is intercepted), and **non-revocable** once signed.
 
@@ -175,11 +208,11 @@ Stored at `~/.x402wallet/config.json` (Windows: `%USERPROFILE%\.x402wallet\confi
 }
 ```
 
-| Network | Chain ID | Default RPC | Aliases |
-|---------|----------|-------------|---------|
-| Ethereum | 1 | `https://cloudflare-eth.com` | `eth` |
-| Base *(default)* | 8453 | `https://mainnet.base.org` | — |
-| Base Sepolia | 84532 | `https://sepolia.base.org` | `base_sepolia`, `base-sepolia-testnet` |
+| Network | Chain ID | CAIP-2 (v2) | Default RPC | Aliases |
+|---------|----------|-------------|-------------|---------|
+| Ethereum | 1 | `eip155:1` | `https://cloudflare-eth.com` | `eth` |
+| Base *(default)* | 8453 | `eip155:8453` | `https://mainnet.base.org` | — |
+| Base Sepolia | 84532 | `eip155:84532` | `https://sepolia.base.org` | `base_sepolia`, `base-sepolia-testnet` |
 
 ```
 x402-wallet config-set --network base-sepolia
