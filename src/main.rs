@@ -3,6 +3,7 @@
 //! This wallet creates EIP-3009 payment authorizations for x402-protected APIs
 //! and provides basic EVM wallet functionality (balance checks, transfers).
 
+use alloy::providers::Provider as _;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -177,10 +178,12 @@ async fn main() -> Result<()> {
             accepted,
         } => {
             let ctx = store::load_wallet_context().await?;
-            let client = evm::provider_with_wallet(ctx.wallet.clone()).await?;
+            // http_provider() validates the RPC's chain ID against the config;
+            // the authoritative chain ID then flows into the EIP-712 domain
+            let chain_id = evm::http_provider().await?.get_chain_id().await?;
 
             let header = x402::create_payment(
-                client,
+                chain_id,
                 &ctx.wallet,
                 &pay_to,
                 &token,

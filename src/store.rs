@@ -1,18 +1,17 @@
+use alloy::primitives::Address;
+use alloy::signers::local::PrivateKeySigner;
 use anyhow::{anyhow, Result};
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     XChaCha20Poly1305, Key, XNonce,
 };
 use dotenvy::dotenv_override;
-use ethers::signers::{LocalWallet, Signer};
-use ethers::types::H160;
 use rand::{rngs::OsRng, RngCore};
 use rpassword::prompt_password;
 use serde::{Deserialize, Serialize};
-use std::{env, fs, io::Write, path::PathBuf, str::FromStr};
+use std::{env, fs, path::PathBuf, str::FromStr};
 use zeroize::Zeroize;
 
-use crate::evm;
 use crate::utils::home_dir; // <— fixed module path
 
 const APP_DIR: &str = ".x402wallet";
@@ -21,7 +20,7 @@ const KEYSTORE: &str = "keystore.json";
 #[derive(Serialize, Deserialize)]
 struct FileKeystore { salt: String, nonce: String, ct: String }
 
-pub struct WalletContext { pub wallet: LocalWallet, pub address: H160 }
+pub struct WalletContext { pub wallet: PrivateKeySigner, pub address: Address }
 
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?; p.push(APP_DIR);
@@ -31,8 +30,8 @@ fn app_path() -> Result<PathBuf> {
 pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result<()> {
     let create_new = prompt("Create new private key (y/N)? ")?;
     let pk_hex = if create_new.to_lowercase().starts_with('y') {
-        let wallet = LocalWallet::new(&mut OsRng);
-        let secret_bytes = wallet.signer().to_bytes();
+        let wallet = PrivateKeySigner::random();
+        let secret_bytes = wallet.to_bytes();
         format!("0x{}", hex::encode(secret_bytes))
     } else {
         println!("Paste 0x-prefixed 32-byte hex private key (input hidden):");
@@ -70,6 +69,7 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
 
         #[cfg(unix)]
         {
+            use std::io::Write as _;
             use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
             // mode(0o600) applies at creation (no world-readable window);
             // set_permissions also repairs pre-existing files with looser modes
@@ -121,7 +121,7 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let mut pass = pass; pass.zeroize();
     }
 
-    let wallet = LocalWallet::from_str(&pk_hex)?.with_chain_id(evm::chain_id().await?);
+    let wallet = PrivateKeySigner::from_str(&pk_hex)?;
     println!("wallet address: {:#x}", wallet.address());
     Ok(())
 }
@@ -168,6 +168,6 @@ async fn load_private_key_hex() -> Result<String> {
 
 pub async fn load_wallet_context() -> Result<WalletContext> {
     let pk = load_private_key_hex().await?;
-    let wallet = LocalWallet::from_str(&pk)?.with_chain_id(crate::evm::chain_id().await?);
+    let wallet = PrivateKeySigner::from_str(&pk)?;
     Ok(WalletContext { address: wallet.address(), wallet })
 }

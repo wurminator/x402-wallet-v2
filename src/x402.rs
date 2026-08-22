@@ -3,17 +3,32 @@
 //! Creates EIP-3009 transfer authorizations for gasless USDC payments
 //! according to the x402 specification.
 
+use alloy::primitives::{Address, B256, U256};
+use alloy::signers::local::PrivateKeySigner;
+use alloy::signers::Signer;
+use alloy::sol_types::Eip712Domain;
 use anyhow::Result;
 use base64::Engine as _;
-use ethers::{
-    middleware::SignerMiddleware,
-    prelude::*,
-    types::{Address, U256},
-    signers::Signer,
-};
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// EIP-3009 TransferWithAuthorization message, signed via EIP-712.
+// Field names must match the token contract's type hash exactly.
+mod eip3009 {
+    alloy::sol! {
+        #[derive(Debug)]
+        struct TransferWithAuthorization {
+            address from;
+            address to;
+            uint256 value;
+            uint256 validAfter;
+            uint256 validBefore;
+            bytes32 nonce;
+        }
+    }
+}
+pub use eip3009::TransferWithAuthorization;
 
 /// X402 v1 payment header structure (X-PAYMENT)
 #[derive(Debug, Serialize)]
@@ -88,7 +103,8 @@ struct Authorization {
 /// Creates an x402 payment header for EIP-3009 token transfers
 ///
 /// # Arguments
-/// * `client` - Ethereum provider with signer
+/// * `chain_id` - Chain ID of the configured network (caller must validate
+///   it against the RPC — `evm::http_provider()` does that)
 /// * `wallet` - Wallet to sign the authorization
 /// * `pay_to` - Recipient address (from 402 response)
 /// * `token_addr` - Token contract address (from 402 response)
@@ -104,13 +120,8 @@ struct Authorization {
 /// Base64-encoded X-PAYMENT (v1) or PAYMENT-SIGNATURE (v2) header value
 #[allow(clippy::too_many_arguments)]
 pub async fn create_payment(
-    client: std::sync::Arc<
-        SignerMiddleware<
-            Provider<ethers::providers::Http>,
-            Wallet<ethers::core::k256::ecdsa::SigningKey>,
-        >,
-    >,
-    wallet: &Wallet<ethers::core::k256::ecdsa::SigningKey>,
+    chain_id: u64,
+    wallet: &PrivateKeySigner,
     pay_to: &str,
     token_addr: &str,
     amount: &str,
@@ -119,15 +130,12 @@ pub async fn create_payment(
     v2: bool,
     resource_url: Option<&str>,
     max_timeout_seconds: Option<u64>,
-    // accepted_json: Full `accepts[0]` object from the 402 response (JSON).
+    // accepted_json: Full `accepts[0] object from the 402 response (JSON).
     // When given, it is echoed VERBATIM as `accepted` — the only fully
     // provider-agnostic way, since servers deepEqual the echo (including
     // custom extra fields like Exa's breakdown/totalUsd/acceptId).
     accepted_json: Option<&str>,
 ) -> Result<String> {
-    // Chain ID from the provider (validates RPC matches config in http_provider)
-    let chain_id = client.get_chainid().await?.as_u64();
-
     // Get current network name from config (for v1 envelope / CAIP-2 mapping)
     let cfg = crate::evm::load_network().await?;
     let network = cfg.network.clone();
@@ -154,7 +162,7 @@ pub async fn create_payment(
 /// `create_payment` is only a thin RPC/config wrapper around it.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_payment(
-    wallet: &Wallet<ethers::core::k256::ecdsa::SigningKey>,
+    wallet: &PrivateKeySigner,
     chain_id: u64,
     network: &str,
     pay_to: &str,
@@ -171,7 +179,14 @@ pub async fn build_payment(
     let payer = wallet.address();
     let pay_to_addr: Address = pay_to.parse()?;
     let token: Address = token_addr.parse()?;
-    let value: U256 = U256::from_dec_str(amount)?;
+    // Decimal-only parsing: alloy's FromStr would accept 0x-prefixed values,
+    // which the CLI contract rejects. Empty string keeps the documented
+    // legacy behavior of signing a zero-value payment.
+    let value = if amount.is_empty() {
+        U256::ZERO
+    } else {
+        U256::from_str_radix(amount, 10)?
+    };
 
     // EIP-712 domain parameters (must match token contract)
     let token_name = token_name.unwrap_or("USD Coin");
@@ -189,47 +204,27 @@ pub async fn build_payment(
     let mut nonce = [0u8; 32];
     OsRng.fill_bytes(&mut nonce);
 
-    // Build EIP-712 typed data structure
-    let td_json = serde_json::json!({
-      "types": {
-        "EIP712Domain": [
-          {"name":"name","type":"string"},
-          {"name":"version","type":"string"},
-          {"name":"chainId","type":"uint256"},
-          {"name":"verifyingContract","type":"address"}
-        ],
-        "TransferWithAuthorization": [
-          {"name":"from","type":"address"},
-          {"name":"to","type":"address"},
-          {"name":"value","type":"uint256"},
-          {"name":"validAfter","type":"uint256"},
-          {"name":"validBefore","type":"uint256"},
-          {"name":"nonce","type":"bytes32"}
-        ]
-      },
-      "primaryType":"TransferWithAuthorization",
-      "domain":{
-        "name": token_name,
-        "version": token_version,
-        "chainId": chain_id,
-        "verifyingContract": format!("{:#x}", token)
-      },
-      "message":{
-        "from": format!("{:#x}", payer),
-        "to": format!("{:#x}", pay_to_addr),
-        "value": value.to_string(),
-        "validAfter": valid_after.to_string(),
-        "validBefore": valid_before.to_string(),
-        "nonce": format!("0x{}", hex::encode(nonce))
-      }
-    });
+    // EIP-712 typed data (EIP-3009 TransferWithAuthorization)
+    let domain = Eip712Domain::new(
+        Some(token_name.to_string().into()),
+        Some(token_version.to_string().into()),
+        Some(U256::from(chain_id)),
+        Some(token),
+        None,
+    );
+    let typed = TransferWithAuthorization {
+        from: payer,
+        to: pay_to_addr,
+        value,
+        validAfter: U256::from(valid_after),
+        validBefore: U256::from(valid_before),
+        nonce: B256::from(nonce),
+    };
+    let sig = wallet.sign_typed_data(&typed, &domain).await?;
 
-    // Sign the typed data
-    let typed: ethers::types::transaction::eip712::TypedData = serde_json::from_value(td_json)?;
-    let sig = wallet.sign_typed_data(&typed).await?;
-
-    // Combine signature components (r, s, v) into single hex string
-    let combined_sig = format!("0x{:064x}{:064x}{:02x}", sig.r, sig.s, sig.v);
+    // Combine signature components (r, s, v) into single hex string —
+    // as_bytes() is exactly r || s || v (65 bytes, v = 27 + y_parity)
+    let combined_sig = format!("0x{}", hex::encode(sig.as_bytes()));
 
     // Build authorization payload
     let payload = ExactEvm {

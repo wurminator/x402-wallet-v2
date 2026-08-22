@@ -12,9 +12,10 @@
 //!   3. `accepted` must be the COMPLETE accepts[0] object when provided
 //!      (Exa requires breakdown/totalUsd/acceptId to be echoed).
 
+use alloy::primitives::{Address, B256, Signature, U256};
+use alloy::signers::local::PrivateKeySigner;
+use alloy::sol_types::{Eip712Domain, SolStruct};
 use base64::Engine as _;
-use ethers::signers::{LocalWallet, Signer};
-use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use x402_wallet::{evm, x402};
 
@@ -31,10 +32,42 @@ fn now() -> u64 {
         .as_secs()
 }
 
-async fn wallet() -> LocalWallet {
-    LocalWallet::from_bytes(&hex::decode(TEST_KEY.trim_start_matches("0x")).unwrap())
+fn wallet() -> PrivateKeySigner {
+    PrivateKeySigner::from_bytes(&B256::from_slice(&hex::decode(TEST_KEY.trim_start_matches("0x")).unwrap()))
         .unwrap()
-        .with_chain_id(8453u64)
+}
+
+/// Reconstructs the EIP-712 domain the signer used (must mirror x402.rs)
+fn eip712_domain(name: &str, version: &str, chain_id: u64, verifying_contract: &str) -> Eip712Domain {
+    Eip712Domain::new(
+        Some(name.to_string().into()),
+        Some(version.to_string().into()),
+        Some(U256::from(chain_id)),
+        Some(verifying_contract.parse::<Address>().unwrap()),
+        None,
+    )
+}
+
+/// Recovers the signer address from an EIP-712 signature over the given
+/// authorization fields (mirrors the facilitator's on-chain verification)
+fn recover_signer(domain: &Eip712Domain, auth: &serde_json::Value, sig_hex: &str) -> Address {
+    use x402::TransferWithAuthorization;
+    let typed = TransferWithAuthorization {
+        from: auth["from"].as_str().unwrap().parse().unwrap(),
+        to: auth["to"].as_str().unwrap().parse().unwrap(),
+        value: auth["value"].as_str().unwrap().parse().unwrap(),
+        validAfter: auth["validAfter"].as_str().unwrap().parse().unwrap(),
+        validBefore: auth["validBefore"].as_str().unwrap().parse().unwrap(),
+        nonce: auth["nonce"].as_str().unwrap().parse().unwrap(),
+    };
+    let digest = typed.eip712_signing_hash(domain);
+    let bytes = hex::decode(sig_hex.trim_start_matches("0x")).unwrap();
+    let mut arr = [0u8; 65];
+    arr.copy_from_slice(&bytes);
+    Signature::from_raw_array(&arr)
+        .unwrap()
+        .recover_address_from_prehash(&digest)
+        .unwrap()
 }
 
 /// Builds a v2 header via the offline core and decodes it to JSON.
@@ -42,7 +75,7 @@ async fn build_v2(
     accepted_json: Option<&str>,
     max_timeout: Option<u64>,
 ) -> serde_json::Value {
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w,
         8453,
@@ -132,9 +165,7 @@ async fn v2_accepted_json_is_echoed_verbatim() {
 
 #[tokio::test]
 async fn v2_signature_recovers_to_wallet_address() {
-    use ethers::types::transaction::eip712::TypedData;
-
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w,
         8453,
@@ -158,46 +189,10 @@ async fn v2_signature_recovers_to_wallet_address() {
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     let auth = &p["payload"]["authorization"];
 
-    // Reconstruct the exact typed data the signer used
-    let td = serde_json::json!({
-        "types": {
-            "EIP712Domain": [
-                {"name":"name","type":"string"},
-                {"name":"version","type":"string"},
-                {"name":"chainId","type":"uint256"},
-                {"name":"verifyingContract","type":"address"}
-            ],
-            "TransferWithAuthorization": [
-                {"name":"from","type":"address"},
-                {"name":"to","type":"address"},
-                {"name":"value","type":"uint256"},
-                {"name":"validAfter","type":"uint256"},
-                {"name":"validBefore","type":"uint256"},
-                {"name":"nonce","type":"bytes32"}
-            ]
-        },
-        "primaryType": "TransferWithAuthorization",
-        "domain": {
-            "name": "USD Coin",
-            "version": "2",
-            "chainId": 8453,
-            "verifyingContract": USDC_BASE
-        },
-        "message": {
-            "from": auth["from"],
-            "to": auth["to"],
-            "value": auth["value"],
-            "validAfter": auth["validAfter"],
-            "validBefore": auth["validBefore"],
-            "nonce": auth["nonce"]
-        }
-    });
-    let typed: TypedData = serde_json::from_value(td).unwrap();
-
-    // Recover the signer from the signature
+    // Reconstruct the exact typed data the signer used (defaults: USD Coin / 2)
+    let domain = eip712_domain("USD Coin", "2", 8453, USDC_BASE);
     let sig_hex = p["payload"]["signature"].as_str().unwrap();
-    let sig = ethers::types::Signature::from_str(sig_hex).unwrap();
-    let recovered = sig.recover_typed_data(&typed).unwrap();
+    let recovered = recover_signer(&domain, auth, sig_hex);
 
     assert_eq!(
         format!("{:#x}", recovered),
@@ -219,7 +214,7 @@ async fn v2_signature_recovers_to_wallet_address() {
 
 #[tokio::test]
 async fn v1_envelope_uses_plain_network_name() {
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
         None, None, false, None, None, None,
@@ -259,7 +254,7 @@ async fn v2_envelope_shape() {
 #[tokio::test]
 async fn rejects_invalid_pay_to_address() {
     // Keine gültige Hex-Adresse → Parse-Fehler statt stiller Fehl-Signatur
-    let w = wallet().await;
+    let w = wallet();
     assert!(x402::build_payment(
         &w, 8453, "base", "not-an-address", USDC_BASE, "7000",
         None, None, false, None, None, None,
@@ -269,7 +264,7 @@ async fn rejects_invalid_pay_to_address() {
 #[tokio::test]
 async fn rejects_invalid_token_address() {
     // Asset-Adresse muss parse-bar sein (wird für EIP-712 verifyingContract gebraucht)
-    let w = wallet().await;
+    let w = wallet();
     assert!(x402::build_payment(
         &w, 8453, "base", PAY_TO, "0x123", "7000",
         None, None, false, None, None, None,
@@ -279,7 +274,7 @@ async fn rejects_invalid_token_address() {
 #[tokio::test]
 async fn rejects_non_numeric_amount() {
     // Amount muss Dezimal-String in smallest units sein
-    let w = wallet().await;
+    let w = wallet();
     for bad in ["7000.5", "-1", "0x1a", "abc"] {
         assert!(
             x402::build_payment(
@@ -294,7 +289,7 @@ async fn rejects_non_numeric_amount() {
 #[tokio::test]
 async fn accepts_zero_amount() {
     // "0" ist ein valider U256-Wert —Happy Path an der Grenze (Server lehnen ggf. ab, wir nicht)
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "0",
         None, None, false, None, None, None,
@@ -307,7 +302,7 @@ async fn accepts_zero_amount() {
 #[tokio::test]
 async fn accepts_huge_amount_as_u256() {
     // Sechsstelliger Betrag (USDC 6 decimals, max supply ~2^53) muss ohne Überlauf durchgehen
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "1000000000000000000000000000",
         None, None, false, None, None, None,
@@ -323,7 +318,7 @@ async fn accepts_huge_amount_as_u256() {
 #[tokio::test]
 async fn rejects_malformed_accepted_json() {
     // Ungültiges JSON im accepted_json-Passthrough muss fehlschlagen, kein leeres Echo
-    let w = wallet().await;
+    let w = wallet();
     assert!(x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
         None, None, true, None, Some(300), Some("{not json"),
@@ -333,7 +328,7 @@ async fn rejects_malformed_accepted_json() {
 #[tokio::test]
 async fn rejects_v2_with_unknown_network_without_accepted_json() {
     // Ohne accepted_json muss CAIP-2 gemapped werden — unbekanntes Netz → Fehler
-    let w = wallet().await;
+    let w = wallet();
     assert!(x402::build_payment(
         &w, 1, "unknownnet", PAY_TO, USDC_BASE, "7000",
         None, None, true, None, None, None,
@@ -343,7 +338,7 @@ async fn rejects_v2_with_unknown_network_without_accepted_json() {
 #[tokio::test]
 async fn v2_unknown_network_ok_with_accepted_json() {
     // Mit verbatim accepted_json wird kein CAIP-2-Mapping gebraucht → beliebige Netze möglich
-    let w = wallet().await;
+    let w = wallet();
     let accepted = serde_json::json!({
         "scheme": "exact", "network": "eip155:9999", "amount": "7000",
         "asset": USDC_BASE, "payTo": PAY_TO, "maxTimeoutSeconds": 60
@@ -360,7 +355,7 @@ async fn v2_unknown_network_ok_with_accepted_json() {
 #[tokio::test]
 async fn v1_unknown_network_passes_through() {
     // v1 nutzt den Netzwerk-Namen unverändert — kein Mapping, kein Fehler
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "unknownnet", PAY_TO, USDC_BASE, "7000",
         None, None, false, None, None, None,
@@ -404,7 +399,7 @@ async fn zero_timeout_yields_valid_before_now() {
 #[tokio::test]
 async fn custom_token_name_and_version_flow_into_domain() {
     // Eigene Token-Metadaten müssen in extra UND in die EIP-712-Domain einfließen
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
         Some("Euro Coin"), Some("3"), false, None, None, None,
@@ -412,41 +407,10 @@ async fn custom_token_name_and_version_flow_into_domain() {
     let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     // v1 hat kein accepted; Domain-Check via Signatur-Recovery mit korrekter Domain
-    use ethers::types::transaction::eip712::TypedData;
     let auth = &p["payload"]["authorization"];
-    let td = serde_json::json!({
-        "types": {
-            "EIP712Domain": [
-                {"name":"name","type":"string"},
-                {"name":"version","type":"string"},
-                {"name":"chainId","type":"uint256"},
-                {"name":"verifyingContract","type":"address"}
-            ],
-            "TransferWithAuthorization": [
-                {"name":"from","type":"address"},
-                {"name":"to","type":"address"},
-                {"name":"value","type":"uint256"},
-                {"name":"validAfter","type":"uint256"},
-                {"name":"validBefore","type":"uint256"},
-                {"name":"nonce","type":"bytes32"}
-            ]
-        },
-        "primaryType": "TransferWithAuthorization",
-        "domain": {
-            "name": "Euro Coin", "version": "3", "chainId": 8453,
-            "verifyingContract": USDC_BASE
-        },
-        "message": {
-            "from": auth["from"], "to": auth["to"], "value": auth["value"],
-            "validAfter": auth["validAfter"], "validBefore": auth["validBefore"],
-            "nonce": auth["nonce"]
-        }
-    });
-    let typed: TypedData = serde_json::from_value(td).unwrap();
-    let sig = ethers::types::Signature::from_str(
-        p["payload"]["signature"].as_str().unwrap()
-    ).unwrap();
-    let recovered = sig.recover_typed_data(&typed).unwrap();
+    let domain = eip712_domain("Euro Coin", "3", 8453, USDC_BASE);
+    let recovered =
+        recover_signer(&domain, auth, p["payload"]["signature"].as_str().unwrap());
     assert_eq!(format!("{:#x}", recovered), format!("{:#x}", w.address()),
         "signature must verify against the custom EIP-712 domain");
 }
@@ -454,7 +418,7 @@ async fn custom_token_name_and_version_flow_into_domain() {
 #[tokio::test]
 async fn v2_without_resource_url_omits_resource_field() {
     // resource ist Optioneel (skip_serializing_if) — ohne URL darf kein resource-Key auftauchen
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
         None, None, true, None, Some(300), None,
@@ -469,7 +433,7 @@ async fn whitespace_addresses_rejected_at_parse_not_trimmed() {
     // DOKUMENTIERTES IST-VERHALTEN: Address-Parsing läuft VOR dem Echo-Trim,
     // daher wird " 0x..." abgelehnt — das trim() im Echo ist dafür wirkungslos.
     // Wer Leerzeichen tolerieren will, muss vor build_payment normalisieren.
-    let w = wallet().await;
+    let w = wallet();
     assert!(x402::build_payment(
         &w, 8453, "base", &format!(" {} ", PAY_TO), USDC_BASE, "7000",
         None, None, true, None, Some(300), None,
@@ -481,7 +445,7 @@ async fn empty_amount_silently_becomes_zero_value_payment() {
     // DOKUMENTIERTES IST-VERHALTEN (Befund, kein Soll): U256::from_dec_str("")
     // ergibt Ok(0) — ein leerer Amount wird als 0-Zahlung signiert, nicht
     // abgelehnt. Server sollten das fangen; der Client tut es aktuell nicht.
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "",
         None, None, false, None, None, None,
@@ -494,7 +458,7 @@ async fn empty_amount_silently_becomes_zero_value_payment() {
 #[tokio::test]
 async fn output_is_valid_base64_and_json() {
     // Rückgabe ist base64(STANDARD-Alphabet) über validem JSON —Vertrag für den HTTP-Header
-    let w = wallet().await;
+    let w = wallet();
     let b64 = x402::build_payment(
         &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
         None, None, true, Some("https://example.com"), Some(60), None,
@@ -508,7 +472,7 @@ async fn output_is_valid_base64_and_json() {
 async fn nonces_differ_between_calls() {
     // Nonce muss kryptografisch frisch sein — zwei Zahlungen dürfen nicht
     // kollidieren (blockieren sonst gegenseitig via EIP-3009 nonce-Verbrauch)
-    let w = wallet().await;
+    let w = wallet();
     let build = || async {
         let b64 = x402::build_payment(
             &w, 8453, "base", PAY_TO, USDC_BASE, "7000",

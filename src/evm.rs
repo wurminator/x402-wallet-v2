@@ -1,13 +1,14 @@
 //! EVM network configuration and blockchain interaction utilities
 
+use alloy::network::{Ethereum, TransactionBuilder};
+use alloy::primitives::{Address, utils::format_units, utils::parse_ether, utils::parse_units, utils::ParseUnits};
+use alloy::providers::{Provider, ProviderBuilder};
+use alloy::rpc::types::TransactionRequest;
+use alloy::sol;
 use anyhow::{anyhow, Result};
-use ethers::{
-    prelude::*,
-    providers::{Http, Provider},
-    types::{Address, TransactionRequest},
-};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fs, path::PathBuf, str::FromStr};
+use url::Url;
 
 use crate::utils::home_dir;
 
@@ -119,21 +120,26 @@ pub fn caip2_for_network(name: &str) -> Result<String> {
     .to_string())
 }
 
-/// Create HTTP provider for configured network (validates chain ID)
-pub async fn http_provider() -> Result<Provider<Http>> {
+/// Resolve the configured RPC URL and the chain ID the network should have
+async fn rpc_url_and_expected_chain() -> Result<(Url, String, u64)> {
     let cfg = load_network().await?;
     let net = cfg.network.clone();
     let url = cfg
         .rpc
         .get(&net)
-        .cloned()
         .ok_or_else(|| anyhow!("no RPC configured for network: {}", net))?;
+    let expected_chain = chain_id().await?;
+    Ok((Url::parse(url)?, net, expected_chain))
+}
 
-    let provider = Provider::<Http>::try_from(url.as_str())?;
+/// Create HTTP provider for configured network (validates chain ID)
+pub async fn http_provider() -> Result<impl Provider<Ethereum> + Clone + Send + Sync + 'static> {
+    let (url, net, expected_chain) = rpc_url_and_expected_chain().await?;
+
+    let provider = ProviderBuilder::new().connect_http(url);
 
     // Verify RPC is on correct chain
-    let rpc_chain = provider.get_chainid().await?.as_u64();
-    let expected_chain = chain_id().await?;
+    let rpc_chain = provider.get_chain_id().await?;
     if rpc_chain != expected_chain {
         return Err(anyhow!(
             "RPC chain ID mismatch: got {}, expected {} for network '{}'",
@@ -148,57 +154,78 @@ pub async fn http_provider() -> Result<Provider<Http>> {
 
 /// Create provider with wallet signer
 pub async fn provider_with_wallet(
-    wallet: Wallet<k256::ecdsa::SigningKey>,
-) -> Result<Arc<SignerMiddleware<Provider<Http>, Wallet<k256::ecdsa::SigningKey>>>> {
-    let provider = http_provider().await?;
-    Ok(Arc::new(SignerMiddleware::new(provider, wallet)))
+    wallet: alloy::signers::local::PrivateKeySigner,
+) -> Result<impl Provider<Ethereum> + Clone + Send + Sync + 'static> {
+    let (url, net, expected_chain) = rpc_url_and_expected_chain().await?;
+
+    let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);
+
+    // Verify RPC is on correct chain
+    let rpc_chain = provider.get_chain_id().await?;
+    if rpc_chain != expected_chain {
+        return Err(anyhow!(
+            "RPC chain ID mismatch: got {}, expected {} for network '{}'",
+            rpc_chain,
+            expected_chain,
+            net
+        ));
+    }
+
+    Ok(provider)
 }
 
 /// Get ETH balance for address
-pub async fn eth_balance(provider: &Provider<Http>, addr: &Address) -> Result<String> {
-    let bal = provider.get_balance(*addr, None).await?;
-    Ok(ethers::utils::format_units(bal, 18)?)
+pub async fn eth_balance<P: Provider<Ethereum>>(provider: &P, addr: &Address) -> Result<String> {
+    let bal = provider.get_balance(*addr).await?;
+    Ok(format_units(bal, "ether")?)
 }
 
 // ERC20 ABI for balance checks and transfers
-abigen!(
-    ERC20,
-    r#"[
-        function decimals() view returns (uint8)
-        function balanceOf(address) view returns (uint256)
-        function transfer(address to, uint256 amount) returns (bool)
-    ]"#
-);
+sol! {
+    #[derive(Debug)]
+    #[sol(rpc)]
+    interface IERC20 {
+        function decimals() external view returns (uint8);
+        function balanceOf(address account) external view returns (uint256);
+        function transfer(address to, uint256 amount) external returns (bool);
+    }
+}
 
 /// Get ERC20 token balance for address
-pub async fn erc20_balance(provider: &Provider<Http>, addr: &Address, token: &str) -> Result<String> {
-    let token_contract = ERC20::new(Address::from_str(token)?, Arc::new(provider.clone()));
+pub async fn erc20_balance<P: Provider<Ethereum> + Clone>(
+    provider: &P,
+    addr: &Address,
+    token: &str,
+) -> Result<String> {
+    let token_contract = IERC20::new(Address::from_str(token)?, provider);
     let decimals = token_contract.decimals().call().await?;
-    let raw_balance = token_contract.balance_of(*addr).call().await?;
-    Ok(ethers::utils::format_units(raw_balance, decimals as u32)?)
+    let raw_balance = token_contract.balanceOf(*addr).call().await?;
+    Ok(format_units(raw_balance, decimals)?)
 }
 
 /// Send ETH transaction
-pub async fn send_eth(
-    client: Arc<SignerMiddleware<Provider<Http>, Wallet<k256::ecdsa::SigningKey>>>,
+pub async fn send_eth<P: Provider<Ethereum> + Clone + 'static>(
+    client: P,
     to: &str,
     eth: &str,
 ) -> Result<String> {
     let to_addr = Address::from_str(to)?;
-    let value = ethers::utils::parse_ether(eth)?;
+    let value = parse_ether(eth)?;
 
-    let tx = TransactionRequest::new().to(to_addr).value(value);
-    let pending = client.send_transaction(tx, None).await?;
-    let receipt = pending
+    let tx = TransactionRequest::default().with_to(to_addr).with_value(value);
+    let receipt = client
+        .send_transaction(tx)
         .await?
-        .ok_or_else(|| anyhow!("transaction dropped from mempool"))?;
+        .get_receipt()
+        .await
+        .map_err(|_| anyhow!("transaction dropped from mempool"))?;
 
     Ok(format!("{:?}", receipt.transaction_hash))
 }
 
 /// Send ERC20 token transaction
-pub async fn send_erc20(
-    client: Arc<SignerMiddleware<Provider<Http>, Wallet<k256::ecdsa::SigningKey>>>,
+pub async fn send_erc20<P: Provider<Ethereum> + Clone + 'static>(
+    client: P,
     token: &str,
     to: &str,
     amount: &str,
@@ -206,15 +233,18 @@ pub async fn send_erc20(
     let token_addr = Address::from_str(token)?;
     let to_addr = Address::from_str(to)?;
 
-    let contract = ERC20::new(token_addr, client.clone());
+    let contract = IERC20::new(token_addr, client);
     let decimals = contract.decimals().call().await?;
-    let raw_amount = ethers::utils::parse_units(amount, decimals as u32)?;
+    let raw_amount = match parse_units(amount, decimals)? {
+        ParseUnits::U256(v) => v,
+        ParseUnits::I256(_) => return Err(anyhow!("negative amounts are not supported")),
+    };
 
-    let call = contract.transfer(to_addr, raw_amount.into());
-    let pending = call.send().await?;
+    let pending = contract.transfer(to_addr, raw_amount).send().await?;
     let receipt = pending
-        .await?
-        .ok_or_else(|| anyhow!("transaction dropped from mempool"))?;
+        .get_receipt()
+        .await
+        .map_err(|_| anyhow!("transaction dropped from mempool"))?;
 
     Ok(format!("{:?}", receipt.transaction_hash))
 }
