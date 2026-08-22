@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build & Test (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (no system OpenSSL needed — rustls only)
+        run: cargo build --release
+
+      - name: Run tests (offline, no funds involved)
+        run: cargo test
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true # enable once existing warnings are cleaned up
+
+      - name: Format check
+        run: cargo fmt --check
+        continue-on-error: true # enable once formatting is applied repo-wide
+
+  # Optional: cross-platform smoke build (the wallet is pure rustls,
+  # so it should compile everywhere without system deps)
+  build-windows:
+    name: Smoke Build (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build
+        run: cargo build --release

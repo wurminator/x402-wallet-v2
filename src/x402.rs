@@ -125,8 +125,49 @@ pub async fn create_payment(
     // custom extra fields like Exa's breakdown/totalUsd/acceptId).
     accepted_json: Option<&str>,
 ) -> Result<String> {
-    // Parse addresses and amount
+    // Chain ID from the provider (validates RPC matches config in http_provider)
     let chain_id = client.get_chainid().await?.as_u64();
+
+    // Get current network name from config (for v1 envelope / CAIP-2 mapping)
+    let cfg = crate::evm::load_network().await?;
+    let network = cfg.network.clone();
+
+    build_payment(
+        wallet,
+        chain_id,
+        &network,
+        pay_to,
+        token_addr,
+        amount,
+        token_name,
+        token_version,
+        v2,
+        resource_url,
+        max_timeout_seconds,
+        accepted_json,
+    )
+    .await
+}
+
+/// Builds and signs an x402 payment header without any network access
+/// (chain_id and network are passed in). This is the fully testable core;
+/// `create_payment` is only a thin RPC/config wrapper around it.
+#[allow(clippy::too_many_arguments)]
+pub async fn build_payment(
+    wallet: &Wallet<ethers::core::k256::ecdsa::SigningKey>,
+    chain_id: u64,
+    network: &str,
+    pay_to: &str,
+    token_addr: &str,
+    amount: &str,
+    token_name: Option<&str>,
+    token_version: Option<&str>,
+    v2: bool,
+    resource_url: Option<&str>,
+    max_timeout_seconds: Option<u64>,
+    accepted_json: Option<&str>,
+) -> Result<String> {
+    // Parse addresses and amount
     let payer = wallet.address();
     let pay_to_addr: Address = pay_to.parse()?;
     let token: Address = token_addr.parse()?;
@@ -203,10 +244,6 @@ pub async fn create_payment(
         },
     };
 
-    // Get current network from config
-    let cfg = crate::evm::load_network().await?;
-    let network = cfg.network.clone();
-
     // Build x402 payment header
     let payment_header = if v2 {
         // v2: CAIP-2 network, resource info and echoed payment requirements
@@ -244,7 +281,7 @@ pub async fn create_payment(
         serde_json::to_value(PaymentPayload {
             x402Version: 1,
             scheme: "exact".to_string(),
-            network,
+            network: network.to_string(),
             payload: serde_json::to_value(payload)?,
         })?
     };

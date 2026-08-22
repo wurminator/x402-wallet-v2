@@ -7,10 +7,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod evm;
-mod store;
-mod utils;
-mod x402;
+use x402_wallet::{evm, store, utils, x402};
 
 #[derive(Parser, Debug)]
 #[command(
