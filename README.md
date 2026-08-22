@@ -68,7 +68,6 @@ Pick one of two storage modes:
 | Storage | `X402_WALLET_PRIVATE_KEY` in `./.env` (plaintext) | `~/.x402wallet/keystore.json` (encrypted) |
 | Password prompt | None — works in scripts and agents | Every command prompts for the passphrase |
 | Suitability | Automation, AI agents, testing, minimal funds | Manual/interactive use only |
-
 Both modes ask `Create new private key (y/N)?` — `y` generates a fresh key, `N` imports an existing one (`0x…` or bare hex, input hidden). The wallet address is printed on success.
 
 ### Fund the wallet
@@ -230,7 +229,7 @@ The provider verifies that the RPC's chain ID matches the configured network on 
 **Key storage:**
 
 - `.env` mode: plaintext key in `./.env`. Re-running `wallet-init` **replaces** the key in place — other variables are preserved, old key lines are removed from the file, and a warning is printed. Access is restricted to the owner: `0600` on Unix (enforced on every init), best-effort `icacls` restriction to the current user on Windows. Still readable by anything with filesystem access — use dedicated wallets with minimal funds only
-- Keystore mode: `~/.x402wallet/keystore.json`, encrypted with XChaCha20-Poly1305, key derived via Argon2 (memory-hard); passphrase is zeroized after use; still vulnerable to keyloggers or memory access
+- Keystore mode: `~/.x402wallet/keystore.json` (owner-only permissions), encrypted with XChaCha20-Poly1305, key derived via **Argon2id per [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html)** (64 MiB, t=3, p=4 — parameters recorded in the file; pre-hardening keystores keep decrypting with their legacy parameters); passphrase is zeroized after use; still vulnerable to keyloggers or memory access
 
 **Best practices:**
 
