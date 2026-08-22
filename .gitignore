@@ -1,2 +1,3 @@
 /target
-.env.zcode/
+.env
+.zcode/
