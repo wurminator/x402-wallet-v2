@@ -106,6 +106,11 @@ enum Cmd {
         /// (from 402 response: accepts[0].maxTimeoutSeconds, v2 only, default: 600)
         #[arg(long)]
         max_timeout_seconds: Option<u64>,
+        /// Full accepts[0] JSON from the 402 response — echoed VERBATIM as
+        /// `accepted` (v2 only). The robust way for providers with custom
+        /// extra fields (e.g. Exa breakdown/totalUsd/acceptId).
+        #[arg(long)]
+        accepted: Option<String>,
     },
 }
 
@@ -172,6 +177,7 @@ async fn main() -> Result<()> {
             v2,
             resource_url,
             max_timeout_seconds,
+            accepted,
         } => {
             let ctx = store::load_wallet_context().await?;
             let client = evm::provider_with_wallet(ctx.wallet.clone()).await?;
@@ -187,6 +193,7 @@ async fn main() -> Result<()> {
                 v2,
                 resource_url.as_deref(),
                 max_timeout_seconds,
+                accepted.as_deref(),
             )
             .await?;
 

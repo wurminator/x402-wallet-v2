@@ -30,7 +30,10 @@ struct PaymentPayloadV2 {
     x402Version: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     resource: Option<ResourceInfo>,
-    accepted: AcceptedRequirements,
+    /// Accepted payment requirements, echoed verbatim from the 402 response
+    /// (`accepts[0]`). Some providers add extra fields (e.g. Exa: breakdown,
+    /// totalUsd, acceptId) that servers deepEqual against the echo.
+    accepted: serde_json::Value,
     payload: serde_json::Value,
 }
 
@@ -116,6 +119,11 @@ pub async fn create_payment(
     v2: bool,
     resource_url: Option<&str>,
     max_timeout_seconds: Option<u64>,
+    // accepted_json: Full `accepts[0]` object from the 402 response (JSON).
+    // When given, it is echoed VERBATIM as `accepted` — the only fully
+    // provider-agnostic way, since servers deepEqual the echo (including
+    // custom extra fields like Exa's breakdown/totalUsd/acceptId).
+    accepted_json: Option<&str>,
 ) -> Result<String> {
     // Parse addresses and amount
     let chain_id = client.get_chainid().await?.as_u64();
@@ -209,20 +217,25 @@ pub async fn create_payment(
                 description: None,
                 mimeType: None,
             }),
-            accepted: AcceptedRequirements {
-                scheme: "exact".to_string(),
-                network: crate::evm::caip2_for_network(&network)?,
-                amount: value.to_string(),
-                // Echo asset/payTo VERBATIM (checksummed) — servers validate the
-                // echo with a case-sensitive deepEqual against the 402 response;
-                // re-formatting via {:#x} lowercases them and gets rejected.
-                asset: token_addr.trim().to_string(),
-                payTo: pay_to.trim().to_string(),
-                maxTimeoutSeconds: max_timeout_seconds.unwrap_or(600),
-                extra: TokenExtra {
-                    name: token_name.to_string(),
-                    version: token_version.to_string(),
-                },
+            accepted: if let Some(json) = accepted_json {
+                // Verbatim echo: parse accepts[0] JSON and pass it through 1:1
+                serde_json::from_str::<serde_json::Value>(json)?
+            } else {
+                serde_json::to_value(AcceptedRequirements {
+                    scheme: "exact".to_string(),
+                    network: crate::evm::caip2_for_network(&network)?,
+                    amount: value.to_string(),
+                    // Echo asset/payTo VERBATIM (checksummed) — servers validate the
+                    // echo with a case-sensitive deepEqual against the 402 response;
+                    // re-formatting via {:#x} lowercases them and gets rejected.
+                    asset: token_addr.trim().to_string(),
+                    payTo: pay_to.trim().to_string(),
+                    maxTimeoutSeconds: max_timeout_seconds.unwrap_or(600),
+                    extra: TokenExtra {
+                        name: token_name.to_string(),
+                        version: token_version.to_string(),
+                    },
+                })?
             },
             payload: serde_json::to_value(payload)?,
         })?
