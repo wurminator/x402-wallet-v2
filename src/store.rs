@@ -41,18 +41,67 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
 
     if !keystore {
         let path = dotenv_path.unwrap_or_else(|| PathBuf::from(".env"));
-        let existed = path.exists();
-        let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
-        if !existed {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(&path)?.permissions();
-                perms.set_mode(0o600);
-                fs::set_permissions(&path, perms)?;
+        // Read existing content: keep unrelated variables, drop old key
+        // lines, then rewrite the file. Appending instead would leave
+        // replaced plaintext keys on disk (dotenv takes last-line-wins,
+        // so a stale key would linger unread but readable forever).
+        let existing = fs::read_to_string(&path).unwrap_or_default();
+        let had_key = existing
+            .lines()
+            .any(|l| l.trim_start().starts_with("X402_WALLET_PRIVATE_KEY"));
+        if had_key {
+            eprintln!(
+                "WARNING: replacing X402_WALLET_PRIVATE_KEY in {} — the old key is removed \
+                 from this file. If you did not back it up, funds on it are now inaccessible.",
+                path.display()
+            );
+        }
+        let mut content = String::new();
+        for line in existing.lines() {
+            if line.trim_start().starts_with("X402_WALLET_PRIVATE_KEY") {
+                continue;
+            }
+            content.push_str(line);
+            content.push('\n');
+        }
+        content.push_str("X402_WALLET_PRIVATE_KEY=\"");
+        content.push_str(&pk_hex);
+        content.push_str("\"\n");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            // mode(0o600) applies at creation (no world-readable window);
+            // set_permissions also repairs pre-existing files with looser modes
+            let mut f = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)?;
+            f.write_all(content.as_bytes())?;
+            let mut perms = fs::metadata(&path)?.permissions();
+            perms.set_mode(0o600);
+            fs::set_permissions(&path, perms)?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&path, &content)?;
+            // std has no Windows ACL support — restrict the file to the
+            // current user via icacls (best effort)
+            if let Ok(user) = env::var("USERNAME") {
+                let ok = std::process::Command::new("icacls")
+                    .arg(&path)
+                    .args(["/inheritance:r", "/grant:r"])
+                    .arg(format!("{user}:F"))
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if !ok {
+                    eprintln!("note: could not restrict .env permissions via icacls");
+                }
             }
         }
-        writeln!(f, "X402_WALLET_PRIVATE_KEY=\"{}\"", pk_hex)?;
         println!("Private key stored in {}", path.display());
     } else {
         let pass = prompt_password("Set keystore passphrase: ")?;

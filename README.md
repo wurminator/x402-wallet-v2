@@ -229,7 +229,7 @@ The provider verifies that the RPC's chain ID matches the configured network on 
 
 **Key storage:**
 
-- `.env` mode: plaintext key in `./.env`, file permissions set to `0600` on Unix (newly created files only); readable by anything with filesystem access
+- `.env` mode: plaintext key in `./.env`. Re-running `wallet-init` **replaces** the key in place — other variables are preserved, old key lines are removed from the file, and a warning is printed. Access is restricted to the owner: `0600` on Unix (enforced on every init), best-effort `icacls` restriction to the current user on Windows. Still readable by anything with filesystem access — use dedicated wallets with minimal funds only
 - Keystore mode: `~/.x402wallet/keystore.json`, encrypted with XChaCha20-Poly1305, key derived via Argon2 (memory-hard); passphrase is zeroized after use; still vulnerable to keyloggers or memory access
 
 **Best practices:**
