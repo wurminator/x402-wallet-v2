@@ -1,4 +1,4 @@
-![x402-wallet banner](x402-wallet.png)
+![x402-wallet banner](x402-wallet.jpg)
 
 # x402-wallet
 
