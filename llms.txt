@@ -7,7 +7,7 @@
 Repository: https://github.com/wurminator/x402-wallet-v2
 License: AGPL-3.0
 Protocol: x402 v1 and v2 (HTTP 402 Payment Required)
-Networks: Ethereum (1), Base (8453), Base Sepolia (84532)
+Networks: Ethereum (1), Base (8453), Base Sepolia (84532), Polygon (137)
 
 ## What This Tool Does
 
@@ -71,6 +71,9 @@ Set network to Base mainnet:
 Set network to Base Sepolia:
 ./target/release/x402-wallet config-set --network base-sepolia
 
+Set network to Polygon:
+./target/release/x402-wallet config-set --network polygon
+
 Verify current network:
 cat ~/.x402wallet/config.json
 
@@ -131,7 +134,7 @@ curl -X POST -H "Content-Type: application/json" \
 Expected response: HTTP 200 OK with requested resource
 
 Network note (v2): requirements use CAIP-2 ids - map to wallet config:
-eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia
+eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia, eip155:137 -> polygon
 
 ### Send Tokens
 
@@ -151,6 +154,8 @@ Send USDC (Base):
 USDC on Base (mainnet): 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 USDC on Base Sepolia: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
 USDC on Ethereum: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+Native USDC on Polygon: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
+(NOT the bridged USDC.e 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174 - no EIP-3009, payments fail)
 
 ## AI Agent Workflow Pattern
 
@@ -236,7 +241,8 @@ For a v2 server the flow is identical, except:
   "rpc": {
     "ethereum": "https://cloudflare-eth.com",
     "base": "https://mainnet.base.org",
-    "base-sepolia": "https://sepolia.base.org"
+    "base-sepolia": "https://sepolia.base.org",
+    "polygon": "https://polygon-bor-rpc.publicnode.com"
   }
 }
 

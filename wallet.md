@@ -112,7 +112,7 @@ Parse the 402 response and extract the payment details:
     payTo: accepts[0].payTo
     token: accepts[0].asset
     amount: accepts[0].maxAmountRequired   (v1)  /  accepts[0].amount  (v2)
-    network: accepts[0].network            (v2 CAIP-2: eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia)
+    network: accepts[0].network            (v2 CAIP-2: eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia, eip155:137 -> polygon)
     tokenName: accepts[0].extra.name
     tokenVersion: accepts[0].extra.version
     maxTimeoutSeconds: accepts[0].maxTimeoutSeconds   (v2 only)
@@ -311,6 +311,10 @@ Before making payments, ensure your wallet is on the correct network:
 
     ./target/release/x402-wallet config-set --network base-sepolia
 
+**Set network to Polygon:**
+
+    ./target/release/x402-wallet config-set --network polygon
+
 ---
 
 ## Checking Balance Before Payment
@@ -339,7 +343,10 @@ Always verify you have sufficient funds before attempting payment:
 
 **USDC on Base (mainnet):** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`  
 **USDC on Base Sepolia:** `0x036CbD53842c5426634e7929541eC2318f3dCF7e`  
-**USDC on Ethereum:** `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`
+**USDC on Ethereum:** `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`  
+**Native USDC on Polygon:** `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`  
+
+⚠️ On Polygon, do NOT use the bridged USDC.e (`0x2791...4174`) — it does not support EIP-3009 and payments will fail. Only native Circle USDC works with this wallet.
 
 ---
 

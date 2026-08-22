@@ -14,7 +14,7 @@ use crate::utils::home_dir;
 /// Network configuration (stored in ~/.x402wallet/config.json)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NetCfg {
-    /// Active network: "ethereum", "base", or "base-sepolia"
+    /// Active network: "ethereum", "base", "base-sepolia", or "polygon"
     pub network: String,
     /// RPC URLs for each network
     pub rpc: HashMap<String, String>,
@@ -34,6 +34,7 @@ fn default_rpc_map() -> HashMap<String, String> {
     m.insert("ethereum".into(), "https://cloudflare-eth.com".into());
     m.insert("base".into(), "https://mainnet.base.org".into());
     m.insert("base-sepolia".into(), "https://sepolia.base.org".into());
+    m.insert("polygon".into(), "https://polygon-bor-rpc.publicnode.com".into());
     m
 }
 
@@ -58,10 +59,19 @@ pub async fn save_network(network: &str, rpc: Option<&str>) -> Result<()> {
         "eth" | "ethereum" => "ethereum",
         "base" => "base",
         "base-sepolia" | "base_sepolia" | "base-sepolia-testnet" => "base-sepolia",
+        "polygon" | "matic" => "polygon",
         other => return Err(anyhow!("unknown network: {}", other)),
     };
 
     cfg.network = net.to_string();
+
+    // Ensure the selected network has an RPC entry — migrates configs that
+    // were created before this network was supported
+    if !cfg.rpc.contains_key(net) {
+        if let Some(url) = default_rpc_map().get(net) {
+            cfg.rpc.insert(net.to_string(), url.clone());
+        }
+    }
 
     // Update RPC if provided
     if let Some(url) = rpc {
@@ -92,6 +102,7 @@ pub async fn chain_id() -> Result<u64> {
         "ethereum" => 1u64,
         "base" => 8453u64,
         "base-sepolia" => 84532u64,
+        "polygon" => 137u64,
         other => return Err(anyhow!("unknown network: {}", other)),
     })
 }
@@ -102,6 +113,7 @@ pub fn caip2_for_network(name: &str) -> Result<String> {
         "ethereum" => "eip155:1",
         "base" => "eip155:8453",
         "base-sepolia" => "eip155:84532",
+        "polygon" => "eip155:137",
         other => return Err(anyhow!("unknown network: {}", other)),
     }
     .to_string())

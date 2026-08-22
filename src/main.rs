@@ -17,7 +17,7 @@ mod x402;
     name = "x402-wallet",
     version,
     about = "x402-capable EVM wallet CLI",
-    long_about = "A command-line wallet for creating x402 payments and managing EVM accounts on Ethereum, Base, and Base Sepolia networks."
+    long_about = "A command-line wallet for creating x402 payments and managing EVM accounts on Ethereum, Base, Polygon, and Base Sepolia networks."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -41,7 +41,7 @@ enum Cmd {
 
     /// Configure network settings
     ConfigSet {
-        /// Network name: ethereum, base, or base-sepolia
+        /// Network name: ethereum, base, polygon, or base-sepolia
         #[arg(long)]
         network: String,
         /// Custom RPC URL (optional)

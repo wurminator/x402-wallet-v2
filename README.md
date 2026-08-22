@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![x402](https://img.shields.io/badge/x402-v1%20%7C%20v2%20%22exact%22-purple)
-![Networks](https://img.shields.io/badge/Networks-Ethereum%20%7C%20Base%20%7C%20Base%20Sepolia-blue)
+![Networks](https://img.shields.io/badge/Networks-Ethereum%20%7C%20Base%20%7C%20Polygon%20%7C%20Base%20Sepolia-blue)
 
 A command-line wallet for the [x402 payment protocol](https://x402.org). It creates cryptographic payment authorizations (EIP-3009 signatures) for pay-per-use APIs and manages basic EVM wallet operations — designed to be driven by AI coding agents like Claude Code or Gemini.
 
@@ -18,7 +18,7 @@ A command-line wallet for the [x402 payment protocol](https://x402.org). It crea
 > **x402-wallet** ist ein Kommandozeilen-Wallet für das [x402-Zahlungsprotokoll](https://x402.org). Es erzeugt EIP-3009-Signaturen (gaslose USDC-Überweisungen) und sendet sie als Base64-kodierter `X-PAYMENT`-Header mit — für APIs, die per Abruf bezahlt werden (Pay-per-Use).
 >
 > - **x402 v1 und v2:** erzeugt Zahlungs-Header für `X-PAYMENT` (v1) und `PAYMENT-SIGNATURE` (v2, CAIP-2-Netzwerk-IDs)
-> - **Netzwerke:** Ethereum, Base (Standard) und Base Sepolia (Testnet)
+> - **Netzwerke:** Ethereum, Base (Standard), Polygon und Base Sepolia (Testnet)
 > - **Schlüsselspeicher:** `.env`-Datei (Klartext, automationsfreundlich) oder verschlüsselter Keystore (XChaCha20-Poly1305 + Argon2)
 > - **Zusatzfunktionen:** ETH-/ERC20-Guthaben abfragen, ETH/Token versenden
 > - **Ausgelegt für KI-Agents** (Claude Code, Gemini etc.): saubere Stdout-Ausgaben, keine Passwort-Prompts nötig
@@ -39,7 +39,7 @@ This software may contain bugs and experience breaking changes. **No warranty is
 ## Features
 
 - **x402 payments (v1 & v2)** — create EIP-3009 payment signatures for x402-protected APIs, as v1 `X-PAYMENT` or v2 `PAYMENT-SIGNATURE` header (both Base64-encoded)
-- **Multi-network** — Ethereum, Base (default), Base Sepolia, with custom RPC support
+- **Multi-network** — Ethereum, Base (default), Polygon, Base Sepolia, with custom RPC support
 - **Two key-storage modes** — automation-friendly `.env` file or encrypted keystore (XChaCha20-Poly1305 + Argon2)
 - **Wallet operations** — check ETH/ERC20 balances, send ETH and ERC20 tokens
 - **Agent-friendly** — clean stdout output on every command, designed for LLM coding agents
@@ -153,9 +153,9 @@ wallet-init               Initialize a wallet (create or import a private key)
 
 wallet-address            Display wallet address
 
-config-set                Configure network
-  --network NAME          ethereum | base | base-sepolia (aliases: eth, base_sepolia)
-  --rpc URL               Custom RPC endpoint (optional)
+    config-set                Configure network
+      --network NAME          ethereum | base | polygon | base-sepolia (aliases: eth, matic, base_sepolia)
+      --rpc URL               Custom RPC endpoint (optional)
 
 balance                   Check balance (raw amount on stdout)
   --erc20 ADDRESS         Token address (omit for ETH)
@@ -203,7 +203,8 @@ Stored at `~/.x402wallet/config.json` (Windows: `%USERPROFILE%\.x402wallet\confi
   "rpc": {
     "ethereum": "https://cloudflare-eth.com",
     "base": "https://mainnet.base.org",
-    "base-sepolia": "https://sepolia.base.org"
+    "base-sepolia": "https://sepolia.base.org",
+    "polygon": "https://polygon-bor-rpc.publicnode.com"
   }
 }
 ```
@@ -213,6 +214,9 @@ Stored at `~/.x402wallet/config.json` (Windows: `%USERPROFILE%\.x402wallet\confi
 | Ethereum | 1 | `eip155:1` | `https://cloudflare-eth.com` | `eth` |
 | Base *(default)* | 8453 | `eip155:8453` | `https://mainnet.base.org` | — |
 | Base Sepolia | 84532 | `eip155:84532` | `https://sepolia.base.org` | `base_sepolia`, `base-sepolia-testnet` |
+| Polygon | 137 | `eip155:137` | `https://polygon-bor-rpc.publicnode.com` | `matic` |
+
+> **Polygon token note:** x402 payments on Polygon use the EIP-3009 path, which requires **native Circle USDC** (`0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`). The bridged **USDC.e** (`0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`) does not support EIP-3009 and cannot be used with this wallet.
 
 ```
 x402-wallet config-set --network base-sepolia
