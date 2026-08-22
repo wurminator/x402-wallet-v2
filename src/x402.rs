@@ -120,7 +120,7 @@ pub async fn create_payment(
     // Parse addresses and amount
     let chain_id = client.get_chainid().await?.as_u64();
     let payer = wallet.address();
-    let pay_to: Address = pay_to.parse()?;
+    let pay_to_addr: Address = pay_to.parse()?;
     let token: Address = token_addr.parse()?;
     let value: U256 = U256::from_dec_str(amount)?;
 
@@ -128,9 +128,13 @@ pub async fn create_payment(
     let token_name = token_name.unwrap_or("USD Coin");
     let token_version = token_version.unwrap_or("2");
 
-    // Authorization validity window (current time + 10 minutes)
-    let valid_after = unix_time();
-    let valid_before = valid_after + 600;
+    // Authorization validity window. validAfter MUST be 0 (not "now"):
+    // facilitators reject validAfter > now (ErrValidAfterInFuture), and any
+    // clock skew between signer and facilitator breaks "now". 0 is what the
+    // official client signs. validBefore bounds the window anyway.
+    let timeout = max_timeout_seconds.unwrap_or(600);
+    let valid_after = 0u64;
+    let valid_before = unix_time() + timeout;
 
     // Generate random nonce
     let mut nonce = [0u8; 32];
@@ -163,7 +167,7 @@ pub async fn create_payment(
       },
       "message":{
         "from": format!("{:#x}", payer),
-        "to": format!("{:#x}", pay_to),
+        "to": format!("{:#x}", pay_to_addr),
         "value": value.to_string(),
         "validAfter": valid_after.to_string(),
         "validBefore": valid_before.to_string(),
@@ -183,7 +187,7 @@ pub async fn create_payment(
         signature: combined_sig,
         authorization: Authorization {
             from: format!("{:#x}", payer),
-            to: format!("{:#x}", pay_to),
+            to: format!("{:#x}", pay_to_addr),
             value: value.to_string(),
             validAfter: valid_after.to_string(),
             validBefore: valid_before.to_string(),
@@ -209,8 +213,11 @@ pub async fn create_payment(
                 scheme: "exact".to_string(),
                 network: crate::evm::caip2_for_network(&network)?,
                 amount: value.to_string(),
-                asset: format!("{:#x}", token),
-                payTo: format!("{:#x}", pay_to),
+                // Echo asset/payTo VERBATIM (checksummed) — servers validate the
+                // echo with a case-sensitive deepEqual against the 402 response;
+                // re-formatting via {:#x} lowercases them and gets rejected.
+                asset: token_addr.trim().to_string(),
+                payTo: pay_to.trim().to_string(),
                 maxTimeoutSeconds: max_timeout_seconds.unwrap_or(600),
                 extra: TokenExtra {
                     name: token_name.to_string(),
