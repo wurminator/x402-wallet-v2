@@ -92,7 +92,7 @@ Expected response: HTTP 402 Payment Required. Extract from requirements (accepts
 - payTo: recipient address
 - asset: token contract address (usually USDC)
 - maxAmountRequired (v1) / amount (v2): amount in smallest units (e.g., 10000 = $0.01 USDC)
-- maxTimeoutSeconds (v2 only): payment completion timeout
+- maxTimeoutSeconds: payment validity window - bounds validBefore in BOTH v1 and v2; in v2 it is also echoed in accepted
 - extra.name: token name (e.g., "USD Coin" or "USDC")
 - extra.version: token version (e.g., "2")
 

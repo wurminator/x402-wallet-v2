@@ -113,8 +113,9 @@ struct Authorization {
 /// * `token_version` - Token version for EIP-712 domain (optional, defaults to "2")
 /// * `v2` - Emit an x402 v2 payload (PAYMENT-SIGNATURE header) instead of v1 (X-PAYMENT)
 /// * `resource_url` - Resource URL embedded in the v2 payload (optional)
-/// * `max_timeout_seconds` - maxTimeoutSeconds echoed in v2 accepted requirements
-///   (from 402 response `accepts[0].maxTimeoutSeconds`, defaults to 600)
+/// * `max_timeout_seconds` - Payment validity window in seconds: bounds
+///   `validBefore` in both v1 and v2; in v2 additionally echoed as
+///   `maxTimeoutSeconds` in the accepted requirements (defaults to 600)
 ///
 /// # Returns
 /// Base64-encoded X-PAYMENT (v1) or PAYMENT-SIGNATURE (v2) header value

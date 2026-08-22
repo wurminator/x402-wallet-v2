@@ -176,8 +176,9 @@ create-payment            Create x402 payment signature (Base64 X-PAYMENT / PAYM
   --token-version VER     EIP-712 domain version (accepts[0].extra.version; default: "2")
   --v2                    Emit x402 v2 payload for the PAYMENT-SIGNATURE header (default: v1 for X-PAYMENT)
   --resource-url URL      Resource URL embedded in the v2 payload (optional, v2 only)
-  --max-timeout-seconds N maxTimeoutSeconds echoed in v2 accepted requirements
-                          (accepts[0].maxTimeoutSeconds, v2 only, default: 600)
+  --max-timeout-seconds N Payment validity window in seconds: bounds validBefore
+                          in BOTH v1 and v2; in v2 also echoed as maxTimeoutSeconds
+                          in accepted (from accepts[0].maxTimeoutSeconds, default: 600)
 ```
 
 ## How It Works
@@ -190,7 +191,7 @@ The wallet implements the **"exact"** x402 scheme using **[EIP-3009](https://eip
 
 The EIP-3009 signature is identical for both protocol versions; they differ only in the surrounding envelope. v1 uses `{x402Version: 1, scheme, network, payload}` with a plain network name (`base`). v2 uses `x402Version: 2`, CAIP-2 network identifiers (`eip155:8453`), an optional `resource` object, and echoes the accepted payment requirements from the 402 response (`PAYMENT-REQUIRED` header, Base64-encoded).
 
-Payments are **time-limited** (10 minutes), **stateless** (no funds locked if the header is intercepted), and **non-revocable** once signed.
+Payments are **time-limited** (10 minutes by default, configurable via `--max-timeout-seconds`), **stateless** (no funds locked if the header is intercepted), and **non-revocable** once signed.
 
 ## Configuration
 

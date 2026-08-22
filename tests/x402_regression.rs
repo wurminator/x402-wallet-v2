@@ -488,6 +488,38 @@ async fn nonces_differ_between_calls() {
 }
 
 // ---------------------------------------------------------------------------
+// --max-timeout-seconds semantics: bounds the window in BOTH versions
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn max_timeout_seconds_bounds_v1_validity_window_too() {
+    // Docs used to claim "--max-timeout-seconds (v2 only)" — but the flag
+    // bounds validBefore in BOTH protocol versions (maxTimeoutSeconds is a
+    // v1 PaymentRequirements field as well); only the echo into the v2
+    // `accepted` object is v2-specific.
+    let before = now();
+    let w = wallet();
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+        None, None, false, None, Some(300), None,
+    )
+    .await
+    .unwrap();
+    let after = now();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+
+    let vb: u64 = p["payload"]["authorization"]["validBefore"]
+        .as_str().unwrap().parse().unwrap();
+    assert!(
+        vb >= before + 300 && vb <= after + 300,
+        "v1 validBefore must follow --max-timeout-seconds (was {vb}, window [{before},{after}])"
+    );
+    // ... while the accepted echo remains v2-only
+    assert!(p.get("accepted").is_none());
+}
+
+// ---------------------------------------------------------------------------
 // CAIP-2 mapping
 // ---------------------------------------------------------------------------
 

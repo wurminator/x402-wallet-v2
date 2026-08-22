@@ -100,8 +100,9 @@ enum Cmd {
         /// Resource URL embedded in the v2 payload (optional, v2 only)
         #[arg(long)]
         resource_url: Option<String>,
-        /// maxTimeoutSeconds echoed in v2 accepted requirements
-        /// (from 402 response: accepts[0].maxTimeoutSeconds, v2 only, default: 600)
+        /// Payment validity window in seconds — bounds validBefore in BOTH
+        /// v1 and v2 signatures; in v2 it is also echoed as maxTimeoutSeconds
+        /// in the accepted requirements (default: 600)
         #[arg(long)]
         max_timeout_seconds: Option<u64>,
         /// Full accepts[0] JSON from the 402 response — echoed VERBATIM as

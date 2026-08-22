@@ -101,7 +101,7 @@ Detect the protocol version from the response: **v1** sends payment requirements
 - `asset` - Token contract address (usually USDC)
 - `maxAmountRequired` (v1) / `amount` (v2) - Amount in smallest units (e.g., 10000 = $0.01 for USDC with 6 decimals)
 - `network` - Blockchain network (v1: "base"; v2 CAIP-2: "eip155:8453")
-- `maxTimeoutSeconds` (v2) - Timeout echoed back in the payment
+- `maxTimeoutSeconds` - Payment validity window; when passed via `--max-timeout-seconds` it bounds the signature window in **both** versions (the echo into the v2 `accepted` object is v2-specific)
 - `extra.name` - Token name for signing (e.g., "USD Coin" or "USDC")
 - `extra.version` - Token version for signing (e.g., "2")
 
@@ -115,7 +115,7 @@ Parse the 402 response and extract the payment details:
     network: accepts[0].network            (v2 CAIP-2: eip155:1 -> ethereum, eip155:8453 -> base, eip155:84532 -> base-sepolia, eip155:137 -> polygon)
     tokenName: accepts[0].extra.name
     tokenVersion: accepts[0].extra.version
-    maxTimeoutSeconds: accepts[0].maxTimeoutSeconds   (v2 only)
+    maxTimeoutSeconds: accepts[0].maxTimeoutSeconds   (bounds the validity window in BOTH versions; v2 requirements always carry it)
 
 ### Step 4: Create Payment Signature
 
