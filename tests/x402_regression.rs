@@ -253,6 +253,277 @@ async fn v2_envelope_shape() {
 }
 
 // ---------------------------------------------------------------------------
+// Edge cases & error paths of build_payment()
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn rejects_invalid_pay_to_address() {
+    // Keine gültige Hex-Adresse → Parse-Fehler statt stiller Fehl-Signatur
+    let w = wallet().await;
+    assert!(x402::build_payment(
+        &w, 8453, "base", "not-an-address", USDC_BASE, "7000",
+        None, None, false, None, None, None,
+    ).await.is_err());
+}
+
+#[tokio::test]
+async fn rejects_invalid_token_address() {
+    // Asset-Adresse muss parse-bar sein (wird für EIP-712 verifyingContract gebraucht)
+    let w = wallet().await;
+    assert!(x402::build_payment(
+        &w, 8453, "base", PAY_TO, "0x123", "7000",
+        None, None, false, None, None, None,
+    ).await.is_err());
+}
+
+#[tokio::test]
+async fn rejects_non_numeric_amount() {
+    // Amount muss Dezimal-String in smallest units sein
+    let w = wallet().await;
+    for bad in ["7000.5", "-1", "0x1a", "abc"] {
+        assert!(
+            x402::build_payment(
+                &w, 8453, "base", PAY_TO, USDC_BASE, bad,
+                None, None, false, None, None, None,
+            ).await.is_err(),
+            "amount {bad:?} must be rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn accepts_zero_amount() {
+    // "0" ist ein valider U256-Wert —Happy Path an der Grenze (Server lehnen ggf. ab, wir nicht)
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "0",
+        None, None, false, None, None, None,
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(p["payload"]["authorization"]["value"].as_str().unwrap(), "0");
+}
+
+#[tokio::test]
+async fn accepts_huge_amount_as_u256() {
+    // Sechsstelliger Betrag (USDC 6 decimals, max supply ~2^53) muss ohne Überlauf durchgehen
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "1000000000000000000000000000",
+        None, None, false, None, None, None,
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(
+        p["payload"]["authorization"]["value"].as_str().unwrap(),
+        "1000000000000000000000000000"
+    );
+}
+
+#[tokio::test]
+async fn rejects_malformed_accepted_json() {
+    // Ungültiges JSON im accepted_json-Passthrough muss fehlschlagen, kein leeres Echo
+    let w = wallet().await;
+    assert!(x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+        None, None, true, None, Some(300), Some("{not json"),
+    ).await.is_err());
+}
+
+#[tokio::test]
+async fn rejects_v2_with_unknown_network_without_accepted_json() {
+    // Ohne accepted_json muss CAIP-2 gemapped werden — unbekanntes Netz → Fehler
+    let w = wallet().await;
+    assert!(x402::build_payment(
+        &w, 1, "unknownnet", PAY_TO, USDC_BASE, "7000",
+        None, None, true, None, None, None,
+    ).await.is_err());
+}
+
+#[tokio::test]
+async fn v2_unknown_network_ok_with_accepted_json() {
+    // Mit verbatim accepted_json wird kein CAIP-2-Mapping gebraucht → beliebige Netze möglich
+    let w = wallet().await;
+    let accepted = serde_json::json!({
+        "scheme": "exact", "network": "eip155:9999", "amount": "7000",
+        "asset": USDC_BASE, "payTo": PAY_TO, "maxTimeoutSeconds": 60
+    });
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+        None, None, true, None, Some(60), Some(&accepted.to_string()),
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(p["accepted"]["network"], "eip155:9999");
+}
+
+#[tokio::test]
+async fn v1_unknown_network_passes_through() {
+    // v1 nutzt den Netzwerk-Namen unverändert — kein Mapping, kein Fehler
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "unknownnet", PAY_TO, USDC_BASE, "7000",
+        None, None, false, None, None, None,
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(p["network"], "unknownnet");
+}
+
+#[tokio::test]
+async fn defaults_applied_when_options_none() {
+    // Defaults: maxTimeoutSeconds=600, token name "USD Coin", version "2" (idR-712-Domain)
+    let before = now();
+    let p = build_v2(None, None).await;
+    let after = now();
+
+    assert_eq!(p["accepted"]["maxTimeoutSeconds"], 600);
+    assert_eq!(p["accepted"]["extra"]["name"], "USD Coin");
+    assert_eq!(p["accepted"]["extra"]["version"], "2");
+
+    let vb: u64 = p["payload"]["authorization"]["validBefore"]
+        .as_str().unwrap().parse().unwrap();
+    assert!(
+        vb >= before + 600 && vb <= after + 600,
+        "validBefore must default to ~now+600 (was {vb}, window [{before},{after}])"
+    );
+}
+
+#[tokio::test]
+async fn zero_timeout_yields_valid_before_now() {
+    // maxTimeoutSeconds=0 → validBefore ≈ jetzt; validAfter bleibt 0 (Fenster kann degenerieren, Protokoll erlaubt es)
+    let before = now();
+    let p = build_v2(None, Some(0)).await;
+    let after = now();
+    let vb: u64 = p["payload"]["authorization"]["validBefore"]
+        .as_str().unwrap().parse().unwrap();
+    assert!(vb >= before && vb <= after, "validBefore should be ~now, was {vb}");
+    assert_eq!(p["accepted"]["maxTimeoutSeconds"], 0);
+}
+
+#[tokio::test]
+async fn custom_token_name_and_version_flow_into_domain() {
+    // Eigene Token-Metadaten müssen in extra UND in die EIP-712-Domain einfließen
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+        Some("Euro Coin"), Some("3"), false, None, None, None,
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    // v1 hat kein accepted; Domain-Check via Signatur-Recovery mit korrekter Domain
+    use ethers::types::transaction::eip712::TypedData;
+    let auth = &p["payload"]["authorization"];
+    let td = serde_json::json!({
+        "types": {
+            "EIP712Domain": [
+                {"name":"name","type":"string"},
+                {"name":"version","type":"string"},
+                {"name":"chainId","type":"uint256"},
+                {"name":"verifyingContract","type":"address"}
+            ],
+            "TransferWithAuthorization": [
+                {"name":"from","type":"address"},
+                {"name":"to","type":"address"},
+                {"name":"value","type":"uint256"},
+                {"name":"validAfter","type":"uint256"},
+                {"name":"validBefore","type":"uint256"},
+                {"name":"nonce","type":"bytes32"}
+            ]
+        },
+        "primaryType": "TransferWithAuthorization",
+        "domain": {
+            "name": "Euro Coin", "version": "3", "chainId": 8453,
+            "verifyingContract": USDC_BASE
+        },
+        "message": {
+            "from": auth["from"], "to": auth["to"], "value": auth["value"],
+            "validAfter": auth["validAfter"], "validBefore": auth["validBefore"],
+            "nonce": auth["nonce"]
+        }
+    });
+    let typed: TypedData = serde_json::from_value(td).unwrap();
+    let sig = ethers::types::Signature::from_str(
+        p["payload"]["signature"].as_str().unwrap()
+    ).unwrap();
+    let recovered = sig.recover_typed_data(&typed).unwrap();
+    assert_eq!(format!("{:#x}", recovered), format!("{:#x}", w.address()),
+        "signature must verify against the custom EIP-712 domain");
+}
+
+#[tokio::test]
+async fn v2_without_resource_url_omits_resource_field() {
+    // resource ist Optioneel (skip_serializing_if) — ohne URL darf kein resource-Key auftauchen
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+        None, None, true, None, Some(300), None,
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert!(p.get("resource").is_none(), "resource key must be absent, not null");
+}
+
+#[tokio::test]
+async fn whitespace_addresses_rejected_at_parse_not_trimmed() {
+    // DOKUMENTIERTES IST-VERHALTEN: Address-Parsing läuft VOR dem Echo-Trim,
+    // daher wird " 0x..." abgelehnt — das trim() im Echo ist dafür wirkungslos.
+    // Wer Leerzeichen tolerieren will, muss vor build_payment normalisieren.
+    let w = wallet().await;
+    assert!(x402::build_payment(
+        &w, 8453, "base", &format!(" {} ", PAY_TO), USDC_BASE, "7000",
+        None, None, true, None, Some(300), None,
+    ).await.is_err());
+}
+
+#[tokio::test]
+async fn empty_amount_silently_becomes_zero_value_payment() {
+    // DOKUMENTIERTES IST-VERHALTEN (Befund, kein Soll): U256::from_dec_str("")
+    // ergibt Ok(0) — ein leerer Amount wird als 0-Zahlung signiert, nicht
+    // abgelehnt. Server sollten das fangen; der Client tut es aktuell nicht.
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "",
+        None, None, false, None, None, None,
+    ).await.unwrap();
+    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(p["payload"]["authorization"]["value"].as_str().unwrap(), "0");
+}
+
+#[tokio::test]
+async fn output_is_valid_base64_and_json() {
+    // Rückgabe ist base64(STANDARD-Alphabet) über validem JSON —Vertrag für den HTTP-Header
+    let w = wallet().await;
+    let b64 = x402::build_payment(
+        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+        None, None, true, Some("https://example.com"), Some(60), None,
+    ).await.unwrap();
+    assert!(!b64.contains('/') || b64.len() % 4 == 0); // kein Padding-Fehler
+    let raw = base64::engine::general_purpose::STANDARD.decode(&b64).unwrap();
+    let _: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+}
+
+#[tokio::test]
+async fn nonces_differ_between_calls() {
+    // Nonce muss kryptografisch frisch sein — zwei Zahlungen dürfen nicht
+    // kollidieren (blockieren sonst gegenseitig via EIP-3009 nonce-Verbrauch)
+    let w = wallet().await;
+    let build = || async {
+        let b64 = x402::build_payment(
+            &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
+            None, None, false, None, None, None,
+        ).await.unwrap();
+        let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        p["payload"]["authorization"]["nonce"].as_str().unwrap().to_string()
+    };
+    let n1 = build().await;
+    let n2 = build().await;
+    assert_ne!(n1, n2, "two payments must never share a nonce");
+}
+
+// ---------------------------------------------------------------------------
 // CAIP-2 mapping
 // ---------------------------------------------------------------------------
 
