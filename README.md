@@ -154,7 +154,7 @@ wallet-address            Display wallet address
 
     config-set                Configure network
       --network NAME          ethereum | base | polygon | base-sepolia (aliases: eth, matic, base_sepolia)
-      --rpc URL               Custom RPC endpoint (optional)
+      --rpc URL               Custom RPC endpoint (optional; https required, http only for localhost dev nodes)
 
 balance                   Check balance (raw amount on stdout)
   --erc20 ADDRESS         Token address (omit for ETH)

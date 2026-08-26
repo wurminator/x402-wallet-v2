@@ -1,7 +1,9 @@
 //! EVM network configuration and blockchain interaction utilities
 
 use alloy::network::{Ethereum, TransactionBuilder};
-use alloy::primitives::{Address, utils::format_units, utils::parse_ether, utils::parse_units, utils::ParseUnits};
+use alloy::primitives::{
+    utils::format_units, utils::parse_ether, utils::parse_units, utils::ParseUnits, Address,
+};
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::rpc::types::TransactionRequest;
 use alloy::sol;
@@ -35,7 +37,10 @@ fn default_rpc_map() -> HashMap<String, String> {
     m.insert("ethereum".into(), "https://cloudflare-eth.com".into());
     m.insert("base".into(), "https://mainnet.base.org".into());
     m.insert("base-sepolia".into(), "https://sepolia.base.org".into());
-    m.insert("polygon".into(), "https://polygon-bor-rpc.publicnode.com".into());
+    m.insert(
+        "polygon".into(),
+        "https://polygon-bor-rpc.publicnode.com".into(),
+    );
     m
 }
 
@@ -74,8 +79,11 @@ pub async fn save_network(network: &str, rpc: Option<&str>) -> Result<()> {
         }
     }
 
-    // Update RPC if provided
+    // Update RPC if provided. Validated at ingress: an unvalidated URL
+    // persisted here is the source of every later request (see ADR-0005).
     if let Some(url) = rpc {
+        let parsed = Url::parse(url)?;
+        validate_rpc_url(&parsed)?;
         cfg.rpc.insert(net.to_string(), url.to_string());
     }
 
@@ -129,7 +137,38 @@ async fn rpc_url_and_expected_chain() -> Result<(Url, String, u64)> {
         .get(&net)
         .ok_or_else(|| anyhow!("no RPC configured for network: {}", net))?;
     let expected_chain = chain_id().await?;
-    Ok((Url::parse(url)?, net, expected_chain))
+    let url = Url::parse(url)?;
+    // Validated at egress too: covers configs written before this check
+    // existed and hand-edited config.json files (see ADR-0005).
+    validate_rpc_url(&url)?;
+    Ok((url, net, expected_chain))
+}
+
+/// Validates an RPC endpoint before it is stored or dialed (ADR-0005).
+///
+/// Custom RPC URLs are user-supplied (`config-set --rpc` / config.json) and
+/// are the sink of every request the wallet makes — signed payloads, balance
+/// queries, chain-id checks — so they are treated as untrusted input:
+/// https only, with a loopback exception for local dev nodes (anvil/geth on
+/// 127.0.0.1, [::1] or localhost). Cleartext http to any other host leaks
+/// request data on the wire and is rejected.
+fn validate_rpc_url(url: &Url) -> Result<()> {
+    let is_loopback = match url.host() {
+        Some(url::Host::Domain(h)) => h == "localhost" || h.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    let host = url.host_str().unwrap_or("<no host>");
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback => Ok(()),
+        "http" => Err(anyhow!(
+            "refusing cleartext http RPC for '{host}' — use https \
+             (http is only allowed for localhost dev nodes)"
+        )),
+        other => Err(anyhow!("unsupported RPC URL scheme '{other}' — use https")),
+    }
 }
 
 /// Create HTTP provider for configured network (validates chain ID)
@@ -212,7 +251,9 @@ pub async fn send_eth<P: Provider<Ethereum> + Clone + 'static>(
     let to_addr = Address::from_str(to)?;
     let value = parse_ether(eth)?;
 
-    let tx = TransactionRequest::default().with_to(to_addr).with_value(value);
+    let tx = TransactionRequest::default()
+        .with_to(to_addr)
+        .with_value(value);
     let receipt = client
         .send_transaction(tx)
         .await?
@@ -247,4 +288,47 @@ pub async fn send_erc20<P: Provider<Ethereum> + Clone + 'static>(
         .map_err(|_| anyhow!("transaction dropped from mempool"))?;
 
     Ok(format!("{:?}", receipt.transaction_hash))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(url: &str) -> Result<()> {
+        validate_rpc_url(&Url::parse(url).unwrap())
+    }
+
+    #[test]
+    fn https_rpc_urls_are_accepted() {
+        assert!(check("https://polygon-bor-rpc.publicnode.com").is_ok());
+        assert!(check("https://mainnet.base.org").is_ok());
+        assert!(check("https://rpc.example/some/path?key=abc").is_ok());
+    }
+
+    #[test]
+    fn http_is_only_allowed_for_loopback_dev_nodes() {
+        assert!(check("http://127.0.0.1:8545").is_ok());
+        assert!(check("http://localhost:8545").is_ok());
+        assert!(check("http://[::1]:8545").is_ok());
+        // Private/LAN and public cleartext endpoints are rejected
+        assert!(check("http://192.168.1.10:8545").is_err());
+        assert!(check("http://10.0.0.5:8545").is_err());
+        assert!(check("http://rpc.example.com").is_err());
+    }
+
+    #[test]
+    fn non_http_schemes_are_rejected() {
+        assert!(check("ws://127.0.0.1:8545").is_err());
+        assert!(check("ftp://rpc.example").is_err());
+        assert!(check("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn default_rpc_map_entries_pass_validation() {
+        for url in default_rpc_map().values() {
+            let parsed = Url::parse(url).unwrap();
+            validate_rpc_url(&parsed)
+                .unwrap_or_else(|e| panic!("default RPC {url} must stay valid: {e}"));
+        }
+    }
 }
