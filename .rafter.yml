@@ -1,0 +1,11 @@
+version: "1"
+
+# Rust build output — gitignored, never committed. The .rmeta compiler
+# metadata of third-party crates embeds public doc/test key material
+# (e.g. pkcs8's RSA test PEM), which betterleaks flags as secrets.
+# These are not project secrets; excluding generated build artifacts
+# from secret scanning is Rafter's recommended practice for vendored
+# and generated files.
+scan:
+  exclude_paths:
+    - "target/"
