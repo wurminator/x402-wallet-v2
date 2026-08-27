@@ -56,8 +56,6 @@ cargo build --release
 
 The binary is at `./target/release/x402-wallet` (add it to your `PATH` if you like).
 
-> Optional experimental feature (currently **not wired up** in the code, only declared in `Cargo.toml`): `cargo build --release --features mcp`
-
 ### Set up a key
 
 Pick one of two storage modes:
@@ -179,6 +177,10 @@ create-payment            Create x402 payment signature (Base64 X-PAYMENT / PAYM
   --max-timeout-seconds N Payment validity window in seconds: bounds validBefore
                           in BOTH v1 and v2; in v2 also echoed as maxTimeoutSeconds
                           in accepted (from accepts[0].maxTimeoutSeconds, default: 600)
+  --accepted JSON         Full accepts[0] JSON echoed VERBATIM as `accepted` (v2 only) —
+                          the robust choice for providers with custom extra fields
+                          (e.g. Exa breakdown/totalUsd/acceptId); servers deepEqual
+                          the echo, so the complete object must come back unchanged
 ```
 
 ## How It Works

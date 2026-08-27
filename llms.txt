@@ -117,6 +117,17 @@ For v2 servers (add --v2, send as PAYMENT-SIGNATURE):
   --token-name "USDC" \
   --token-version "2" > payment.txt
 
+For v2 providers with custom extra fields in accepts[0] (e.g. Exa:
+breakdown/totalUsd/acceptId), pass the FULL accepts[0] JSON verbatim:
+./target/release/x402-wallet create-payment \
+  --v2 \
+  --pay-to ADDRESS_FROM_RESPONSE \
+  --token TOKEN_FROM_RESPONSE \
+  --amount AMOUNT_FROM_RESPONSE \
+  --accepted "$(cat accepts0.json)" > payment.txt
+(servers deepEqual the echoed accepted object - it must match the 402
+response exactly, custom fields included)
+
 Step 3: Retry original request with the matching payment header
 
 v1: X-PAYMENT header

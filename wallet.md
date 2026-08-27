@@ -142,6 +142,17 @@ Use x402-wallet to create the payment signature. **Always save to a file** to av
       --token-name "EXTRACTED_TOKEN_NAME" \
       --token-version "EXTRACTED_TOKEN_VERSION" > payment.txt
 
+**v2 providers with custom extra fields (robust variant, `--accepted`):** some providers (e.g. Exa) add their own fields to `accepts[0]` (`breakdown`, `totalUsd`, `acceptId`). Servers compare the echoed `accepted` object field-by-field (deepEqual), so the complete original object must come back unchanged. In that case pass the FULL `accepts[0]` JSON as one argument:
+
+    ./target/release/x402-wallet create-payment \
+      --v2 \
+      --pay-to EXTRACTED_PAY_TO_ADDRESS \
+      --token EXTRACTED_ASSET_ADDRESS \
+      --amount EXTRACTED_AMOUNT \
+      --accepted "$(cat accepts0.json)" > payment.txt
+
+(`--accepted` overrides the hand-built echo; the remaining flags are still needed for the EIP-712 signature itself.)
+
 **Example with actual values (v1):**
 
     ./target/release/x402-wallet create-payment \
