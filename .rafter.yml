@@ -9,3 +9,30 @@ version: "1"
 scan:
   exclude_paths:
     - "target/"
+
+# Triaged false positives from the 2026-08-27 baseline scan
+# (scan d321bfbb-7309-4591-8e76-dec81f4fa3fe, HEAD 73fb670).
+# Each entry documents why the rule does not apply here; revisit if the
+# flagged code shape changes.
+ignore:
+  - paths: ["src/evm.rs"]
+    rules: ["R-F3EFF"] # SSRF via user-controlled URL
+    reason: >-
+      Single-user local CLI: RPC URLs come from the operator's own --rpc
+      flag, their config file, or compile-time default_rpc_map() constants.
+      Every custom RPC is HTTPS-validated at ingress and egress
+      (validate_rpc_url, docs/adr/0005-rpc-url-validation.md). There is no
+      untrusted request boundary, so SSRF is out of scope by design.
+  - paths: ["src/store.rs"]
+    rules: ["R-741DE"] # unchecked integer 'as' cast
+    reason: >-
+      No integer 'as' casts exist in src/store.rs at the scanned revision
+      (grep-verified: only trait imports like 'use std::io::Write as _').
+      The cited lines (57, 289) do not correspond to any cast. Revisit if
+      real numeric casts are introduced.
+  - paths: ["src/store.rs"]
+    rules: ["R-FCB16"] # Actix-web path parameter in file ops
+    reason: >-
+      This project has no Actix-web (or any HTTP server) — it is a CLI.
+      The flagged path originates from the operator's own --dotenv CLI
+      flag, not from an HTTP request, so no traversal boundary exists.
