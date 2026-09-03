@@ -30,6 +30,9 @@ mod eip3009 {
 }
 pub use eip3009::TransferWithAuthorization;
 
+pub const DEFAULT_TOKEN_NAME: &str = "USD Coin";
+pub const DEFAULT_TOKEN_VERSION: &str = "2";
+
 /// X402 v1 payment header structure (X-PAYMENT)
 #[derive(Debug, Serialize)]
 struct PaymentPayload {
@@ -109,8 +112,8 @@ struct Authorization {
 /// * `pay_to` - Recipient address (from 402 response)
 /// * `token_addr` - Token contract address (from 402 response)
 /// * `amount` - Amount in smallest units (from 402 response)
-/// * `token_name` - Token name for EIP-712 domain (optional, defaults to "USD Coin")
-/// * `token_version` - Token version for EIP-712 domain (optional, defaults to "2")
+/// * `token_name` - Token name for EIP-712 domain (optional, defaults to `DEFAULT_TOKEN_NAME`)
+/// * `token_version` - Token version for EIP-712 domain (optional, defaults to `DEFAULT_TOKEN_VERSION`)
 /// * `v2` - Emit an x402 v2 payload (PAYMENT-SIGNATURE header) instead of v1 (X-PAYMENT)
 /// * `resource_url` - Resource URL embedded in the v2 payload (optional)
 /// * `max_timeout_seconds` - Payment validity window in seconds: bounds
@@ -190,8 +193,8 @@ pub async fn build_payment(
     };
 
     // EIP-712 domain parameters (must match token contract)
-    let token_name = token_name.unwrap_or("USD Coin");
-    let token_version = token_version.unwrap_or("2");
+    let token_name = token_name.unwrap_or(DEFAULT_TOKEN_NAME);
+    let token_version = token_version.unwrap_or(DEFAULT_TOKEN_VERSION);
 
     // Authorization validity window. validAfter MUST be 0 (not "now"):
     // facilitators reject validAfter > now (ErrValidAfterInFuture), and any
