@@ -27,7 +27,9 @@ pub struct NetCfg {
 fn cfg_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(".x402wallet/config.json");
-    std::fs::create_dir_all(p.parent().unwrap())?;
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     Ok(p)
 }
 
