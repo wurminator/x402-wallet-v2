@@ -100,6 +100,19 @@ struct Authorization {
     nonce: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PaymentParams<'a> {
+    pub pay_to: &'a str,
+    pub token_addr: &'a str,
+    pub amount: &'a str,
+    pub token_name: Option<&'a str>,
+    pub token_version: Option<&'a str>,
+    pub v2: bool,
+    pub resource_url: Option<&'a str>,
+    pub max_timeout_seconds: Option<u64>,
+    pub accepted_json: Option<&'a str>,
+}
+
 /// Creates an x402 payment header for EIP-3009 token transfers
 ///
 /// # Arguments
@@ -119,85 +132,49 @@ struct Authorization {
 ///
 /// # Returns
 /// Base64-encoded X-PAYMENT (v1) or PAYMENT-SIGNATURE (v2) header value
-#[allow(clippy::too_many_arguments)]
 pub async fn create_payment(
     chain_id: u64,
     wallet: &PrivateKeySigner,
-    pay_to: &str,
-    token_addr: &str,
-    amount: &str,
-    token_name: Option<&str>,
-    token_version: Option<&str>,
-    v2: bool,
-    resource_url: Option<&str>,
-    max_timeout_seconds: Option<u64>,
-    // accepted_json: Full `accepts[0] object from the 402 response (JSON).
-    // When given, it is echoed VERBATIM as `accepted` — the only fully
-    // provider-agnostic way, since servers deepEqual the echo (including
-    // custom extra fields like Exa's breakdown/totalUsd/acceptId).
-    accepted_json: Option<&str>,
+    params: PaymentParams<'_>,
 ) -> Result<String> {
     // Get current network name from config (for v1 envelope / CAIP-2 mapping)
     let cfg = crate::evm::load_network().await?;
     let network = cfg.network.clone();
 
-    build_payment(
-        wallet,
-        chain_id,
-        &network,
-        pay_to,
-        token_addr,
-        amount,
-        token_name,
-        token_version,
-        v2,
-        resource_url,
-        max_timeout_seconds,
-        accepted_json,
-    )
-    .await
+    build_payment(wallet, chain_id, &network, params).await
 }
 
 /// Builds and signs an x402 payment header without any network access
 /// (chain_id and network are passed in). This is the fully testable core;
 /// `create_payment` is only a thin RPC/config wrapper around it.
-#[allow(clippy::too_many_arguments)]
 pub async fn build_payment(
     wallet: &PrivateKeySigner,
     chain_id: u64,
     network: &str,
-    pay_to: &str,
-    token_addr: &str,
-    amount: &str,
-    token_name: Option<&str>,
-    token_version: Option<&str>,
-    v2: bool,
-    resource_url: Option<&str>,
-    max_timeout_seconds: Option<u64>,
-    accepted_json: Option<&str>,
+    params: PaymentParams<'_>,
 ) -> Result<String> {
-    // Parse addresses and amount
+    // Parse addresses and params.amount
     let payer = wallet.address();
-    let pay_to_addr: Address = pay_to.parse()?;
-    let token: Address = token_addr.parse()?;
+    let pay_to_addr: Address = params.pay_to.parse()?;
+    let token: Address = params.token_addr.parse()?;
     // Decimal-only parsing: alloy's FromStr would accept 0x-prefixed values,
     // which the CLI contract rejects. Empty string keeps the documented
     // legacy behavior of signing a zero-value payment.
-    let value = if amount.is_empty() {
+    let value = if params.amount.is_empty() {
         U256::ZERO
     } else {
-        U256::from_str_radix(amount, 10)?
+        U256::from_str_radix(params.amount, 10)?
     };
 
     // EIP-712 domain parameters (must match token contract)
-    let token_name = token_name.unwrap_or("USD Coin");
-    let token_version = token_version.unwrap_or("2");
+    let token_name = params.token_name.unwrap_or("USD Coin");
+    let token_version = params.token_version.unwrap_or("2");
 
     // Authorization validity window. validAfter MUST be 0 (not "now"):
     // facilitators reject validAfter > now (ErrValidAfterInFuture), and any
     // clock skew between signer and facilitator breaks "now". 0 is what the
     // official client signs. validBefore bounds the window anyway.
-    let timeout = max_timeout_seconds.unwrap_or(600);
+    let timeout = params.max_timeout_seconds.unwrap_or(600);
     let valid_after = 0u64;
     let valid_before = unix_time()? + timeout;
 
@@ -241,16 +218,16 @@ pub async fn build_payment(
     };
 
     // Build x402 payment header
-    let payment_header = if v2 {
-        // v2: CAIP-2 network, resource info and echoed payment requirements
+    let payment_header = if params.v2 {
+        // params.v2: CAIP-2 network, resource info and echoed payment requirements
         serde_json::to_value(PaymentPayloadV2 {
             x402Version: 2,
-            resource: resource_url.map(|url| ResourceInfo {
+            resource: params.resource_url.map(|url| ResourceInfo {
                 url: url.to_string(),
                 description: None,
                 mimeType: None,
             }),
-            accepted: if let Some(json) = accepted_json {
+            accepted: if let Some(json) = params.accepted_json {
                 // Verbatim echo: parse accepts[0] JSON and pass it through 1:1
                 serde_json::from_str::<serde_json::Value>(json)?
             } else {
@@ -261,9 +238,9 @@ pub async fn build_payment(
                     // Echo asset/payTo VERBATIM (checksummed) — servers validate the
                     // echo with a case-sensitive deepEqual against the 402 response;
                     // re-formatting via {:#x} lowercases them and gets rejected.
-                    asset: token_addr.trim().to_string(),
-                    payTo: pay_to.trim().to_string(),
-                    maxTimeoutSeconds: max_timeout_seconds.unwrap_or(600),
+                    asset: params.token_addr.trim().to_string(),
+                    payTo: params.pay_to.trim().to_string(),
+                    maxTimeoutSeconds: params.max_timeout_seconds.unwrap_or(600),
                     extra: TokenExtra {
                         name: token_name.to_string(),
                         version: token_version.to_string(),
@@ -290,7 +267,5 @@ pub async fn build_payment(
 
 /// Returns current Unix timestamp in seconds
 fn unix_time() -> Result<u64> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs())
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
 }

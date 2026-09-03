@@ -12,7 +12,7 @@
 //!   3. `accepted` must be the COMPLETE accepts[0] object when provided
 //!      (Exa requires breakdown/totalUsd/acceptId to be echoed).
 
-use alloy::primitives::{Address, B256, Signature, U256};
+use alloy::primitives::{Address, Signature, B256, U256};
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol_types::{Eip712Domain, SolStruct};
 use base64::Engine as _;
@@ -33,12 +33,19 @@ fn now() -> u64 {
 }
 
 fn wallet() -> PrivateKeySigner {
-    PrivateKeySigner::from_bytes(&B256::from_slice(&hex::decode(TEST_KEY.trim_start_matches("0x")).unwrap()))
-        .unwrap()
+    PrivateKeySigner::from_bytes(&B256::from_slice(
+        &hex::decode(TEST_KEY.trim_start_matches("0x")).unwrap(),
+    ))
+    .unwrap()
 }
 
 /// Reconstructs the EIP-712 domain the signer used (must mirror x402.rs)
-fn eip712_domain(name: &str, version: &str, chain_id: u64, verifying_contract: &str) -> Eip712Domain {
+fn eip712_domain(
+    name: &str,
+    version: &str,
+    chain_id: u64,
+    verifying_contract: &str,
+) -> Eip712Domain {
     Eip712Domain::new(
         Some(name.to_string().into()),
         Some(version.to_string().into()),
@@ -71,24 +78,23 @@ fn recover_signer(domain: &Eip712Domain, auth: &serde_json::Value, sig_hex: &str
 }
 
 /// Builds a v2 header via the offline core and decodes it to JSON.
-async fn build_v2(
-    accepted_json: Option<&str>,
-    max_timeout: Option<u64>,
-) -> serde_json::Value {
+async fn build_v2(accepted_json: Option<&str>, max_timeout: Option<u64>) -> serde_json::Value {
     let w = wallet();
     let b64 = x402::build_payment(
         &w,
         8453,
         "base",
-        PAY_TO,
-        USDC_BASE,
-        "7000",
-        None,
-        None,
-        true,
-        Some("https://api.exa.ai/search"),
-        max_timeout,
-        accepted_json,
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: Some("https://api.exa.ai/search"),
+            max_timeout_seconds: max_timeout,
+            accepted_json: accepted_json,
+        },
     )
     .await
     .unwrap();
@@ -122,7 +128,11 @@ async fn v2_signs_valid_after_zero_and_window_from_now() {
     let after = now();
 
     let auth = &p["payload"]["authorization"];
-    assert_eq!(auth["validAfter"].as_str().unwrap(), "0", "validAfter must be \"0\" (ErrValidAfterInFuture otherwise)");
+    assert_eq!(
+        auth["validAfter"].as_str().unwrap(),
+        "0",
+        "validAfter must be \"0\" (ErrValidAfterInFuture otherwise)"
+    );
 
     let vb: u64 = auth["validBefore"].as_str().unwrap().parse().unwrap();
     assert!(
@@ -155,7 +165,10 @@ async fn v2_accepted_json_is_echoed_verbatim() {
     });
     let p = build_v2(Some(&accepts0.to_string()), Some(60)).await;
     // Deep equality: the echo must be IDENTICAL to the input, extra fields included
-    assert_eq!(p["accepted"], accepts0, "accepted must be a verbatim 1:1 echo");
+    assert_eq!(
+        p["accepted"], accepts0,
+        "accepted must be a verbatim 1:1 echo"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -170,15 +183,17 @@ async fn v2_signature_recovers_to_wallet_address() {
         &w,
         8453,
         "base",
-        PAY_TO,
-        USDC_BASE,
-        "7000",
-        None,
-        None,
-        true,
-        Some("https://api.exa.ai/search"),
-        Some(60),
-        None,
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: Some("https://api.exa.ai/search"),
+            max_timeout_seconds: Some(60),
+            accepted_json: None,
+        },
     )
     .await
     .unwrap();
@@ -202,7 +217,10 @@ async fn v2_signature_recovers_to_wallet_address() {
 
     // Cross-check authorization fields against inputs
     assert_eq!(auth["value"].as_str().unwrap(), "7000");
-    assert_eq!(auth["to"].as_str().unwrap().to_lowercase(), PAY_TO.to_lowercase());
+    assert_eq!(
+        auth["to"].as_str().unwrap().to_lowercase(),
+        PAY_TO.to_lowercase()
+    );
     assert!(auth["nonce"].as_str().unwrap().starts_with("0x"));
     // Signature must be 132 hex chars (r+s+v)
     assert_eq!(sig_hex.len(), 132);
@@ -216,8 +234,20 @@ async fn v2_signature_recovers_to_wallet_address() {
 async fn v1_envelope_uses_plain_network_name() {
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        None, None, false, None, None, None,
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        },
     )
     .await
     .unwrap();
@@ -241,7 +271,10 @@ async fn v2_envelope_shape() {
     let p = build_v2(None, Some(300)).await;
     assert_eq!(p["x402Version"], 2);
     assert_eq!(p["resource"]["url"], "https://api.exa.ai/search");
-    assert_eq!(p["accepted"]["network"], "eip155:8453", "CAIP-2 required in v2");
+    assert_eq!(
+        p["accepted"]["network"], "eip155:8453",
+        "CAIP-2 required in v2"
+    );
     assert_eq!(p["accepted"]["scheme"], "exact");
     assert_eq!(p["accepted"]["amount"], "7000");
     assert_eq!(p["accepted"]["maxTimeoutSeconds"], 300);
@@ -256,9 +289,23 @@ async fn rejects_invalid_pay_to_address() {
     // Keine gültige Hex-Adresse → Parse-Fehler statt stiller Fehl-Signatur
     let w = wallet();
     assert!(x402::build_payment(
-        &w, 8453, "base", "not-an-address", USDC_BASE, "7000",
-        None, None, false, None, None, None,
-    ).await.is_err());
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: "not-an-address",
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        }
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]
@@ -266,9 +313,23 @@ async fn rejects_invalid_token_address() {
     // Asset-Adresse muss parse-bar sein (wird für EIP-712 verifyingContract gebraucht)
     let w = wallet();
     assert!(x402::build_payment(
-        &w, 8453, "base", PAY_TO, "0x123", "7000",
-        None, None, false, None, None, None,
-    ).await.is_err());
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: "0x123",
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        }
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]
@@ -278,9 +339,23 @@ async fn rejects_non_numeric_amount() {
     for bad in ["7000.5", "-1", "0x1a", "abc"] {
         assert!(
             x402::build_payment(
-                &w, 8453, "base", PAY_TO, USDC_BASE, bad,
-                None, None, false, None, None, None,
-            ).await.is_err(),
+                &w,
+                8453,
+                "base",
+                x402::PaymentParams {
+                    pay_to: PAY_TO,
+                    token_addr: USDC_BASE,
+                    amount: bad,
+                    token_name: None,
+                    token_version: None,
+                    v2: false,
+                    resource_url: None,
+                    max_timeout_seconds: None,
+                    accepted_json: None,
+                }
+            )
+            .await
+            .is_err(),
             "amount {bad:?} must be rejected"
         );
     }
@@ -291,12 +366,31 @@ async fn accepts_zero_amount() {
     // "0" ist ein valider U256-Wert —Happy Path an der Grenze (Server lehnen ggf. ab, wir nicht)
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "0",
-        None, None, false, None, None, None,
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "0",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-    assert_eq!(p["payload"]["authorization"]["value"].as_str().unwrap(), "0");
+    assert_eq!(
+        p["payload"]["authorization"]["value"].as_str().unwrap(),
+        "0"
+    );
 }
 
 #[tokio::test]
@@ -304,10 +398,26 @@ async fn accepts_huge_amount_as_u256() {
     // Sechsstelliger Betrag (USDC 6 decimals, max supply ~2^53) muss ohne Überlauf durchgehen
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "1000000000000000000000000000",
-        None, None, false, None, None, None,
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "1000000000000000000000000000",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     assert_eq!(
         p["payload"]["authorization"]["value"].as_str().unwrap(),
@@ -320,9 +430,23 @@ async fn rejects_malformed_accepted_json() {
     // Ungültiges JSON im accepted_json-Passthrough muss fehlschlagen, kein leeres Echo
     let w = wallet();
     assert!(x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        None, None, true, None, Some(300), Some("{not json"),
-    ).await.is_err());
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: None,
+            max_timeout_seconds: Some(300),
+            accepted_json: Some("{not json"),
+        }
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]
@@ -330,9 +454,23 @@ async fn rejects_v2_with_unknown_network_without_accepted_json() {
     // Ohne accepted_json muss CAIP-2 gemapped werden — unbekanntes Netz → Fehler
     let w = wallet();
     assert!(x402::build_payment(
-        &w, 1, "unknownnet", PAY_TO, USDC_BASE, "7000",
-        None, None, true, None, None, None,
-    ).await.is_err());
+        &w,
+        1,
+        "unknownnet",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        }
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]
@@ -344,10 +482,26 @@ async fn v2_unknown_network_ok_with_accepted_json() {
         "asset": USDC_BASE, "payTo": PAY_TO, "maxTimeoutSeconds": 60
     });
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        None, None, true, None, Some(60), Some(&accepted.to_string()),
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: None,
+            max_timeout_seconds: Some(60),
+            accepted_json: Some(&accepted.to_string()),
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     assert_eq!(p["accepted"]["network"], "eip155:9999");
 }
@@ -357,10 +511,26 @@ async fn v1_unknown_network_passes_through() {
     // v1 nutzt den Netzwerk-Namen unverändert — kein Mapping, kein Fehler
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "unknownnet", PAY_TO, USDC_BASE, "7000",
-        None, None, false, None, None, None,
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "unknownnet",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     assert_eq!(p["network"], "unknownnet");
 }
@@ -377,7 +547,10 @@ async fn defaults_applied_when_options_none() {
     assert_eq!(p["accepted"]["extra"]["version"], "2");
 
     let vb: u64 = p["payload"]["authorization"]["validBefore"]
-        .as_str().unwrap().parse().unwrap();
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     assert!(
         vb >= before + 600 && vb <= after + 600,
         "validBefore must default to ~now+600 (was {vb}, window [{before},{after}])"
@@ -391,8 +564,14 @@ async fn zero_timeout_yields_valid_before_now() {
     let p = build_v2(None, Some(0)).await;
     let after = now();
     let vb: u64 = p["payload"]["authorization"]["validBefore"]
-        .as_str().unwrap().parse().unwrap();
-    assert!(vb >= before && vb <= after, "validBefore should be ~now, was {vb}");
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        vb >= before && vb <= after,
+        "validBefore should be ~now, was {vb}"
+    );
     assert_eq!(p["accepted"]["maxTimeoutSeconds"], 0);
 }
 
@@ -401,18 +580,36 @@ async fn custom_token_name_and_version_flow_into_domain() {
     // Eigene Token-Metadaten müssen in extra UND in die EIP-712-Domain einfließen
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        Some("Euro Coin"), Some("3"), false, None, None, None,
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: Some("Euro Coin"),
+            token_version: Some("3"),
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     // v1 hat kein accepted; Domain-Check via Signatur-Recovery mit korrekter Domain
     let auth = &p["payload"]["authorization"];
     let domain = eip712_domain("Euro Coin", "3", 8453, USDC_BASE);
-    let recovered =
-        recover_signer(&domain, auth, p["payload"]["signature"].as_str().unwrap());
-    assert_eq!(format!("{:#x}", recovered), format!("{:#x}", w.address()),
-        "signature must verify against the custom EIP-712 domain");
+    let recovered = recover_signer(&domain, auth, p["payload"]["signature"].as_str().unwrap());
+    assert_eq!(
+        format!("{:#x}", recovered),
+        format!("{:#x}", w.address()),
+        "signature must verify against the custom EIP-712 domain"
+    );
 }
 
 #[tokio::test]
@@ -420,12 +617,31 @@ async fn v2_without_resource_url_omits_resource_field() {
     // resource ist Optioneel (skip_serializing_if) — ohne URL darf kein resource-Key auftauchen
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        None, None, true, None, Some(300), None,
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: None,
+            max_timeout_seconds: Some(300),
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-    assert!(p.get("resource").is_none(), "resource key must be absent, not null");
+    assert!(
+        p.get("resource").is_none(),
+        "resource key must be absent, not null"
+    );
 }
 
 #[tokio::test]
@@ -435,9 +651,23 @@ async fn whitespace_addresses_rejected_at_parse_not_trimmed() {
     // Wer Leerzeichen tolerieren will, muss vor build_payment normalisieren.
     let w = wallet();
     assert!(x402::build_payment(
-        &w, 8453, "base", &format!(" {} ", PAY_TO), USDC_BASE, "7000",
-        None, None, true, None, Some(300), None,
-    ).await.is_err());
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: &format!(" {} ", PAY_TO),
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: None,
+            max_timeout_seconds: Some(300),
+            accepted_json: None,
+        }
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]
@@ -447,12 +677,31 @@ async fn empty_amount_silently_becomes_zero_value_payment() {
     // abgelehnt. Server sollten das fangen; der Client tut es aktuell nicht.
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "",
-        None, None, false, None, None, None,
-    ).await.unwrap();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: None,
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-    assert_eq!(p["payload"]["authorization"]["value"].as_str().unwrap(), "0");
+    assert_eq!(
+        p["payload"]["authorization"]["value"].as_str().unwrap(),
+        "0"
+    );
 }
 
 #[tokio::test]
@@ -460,11 +709,27 @@ async fn output_is_valid_base64_and_json() {
     // Rückgabe ist base64(STANDARD-Alphabet) über validem JSON —Vertrag für den HTTP-Header
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        None, None, true, Some("https://example.com"), Some(60), None,
-    ).await.unwrap();
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: true,
+            resource_url: Some("https://example.com"),
+            max_timeout_seconds: Some(60),
+            accepted_json: None,
+        },
+    )
+    .await
+    .unwrap();
     assert!(!b64.contains('/') || b64.len() % 4 == 0); // kein Padding-Fehler
-    let raw = base64::engine::general_purpose::STANDARD.decode(&b64).unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .unwrap();
     let _: serde_json::Value = serde_json::from_slice(&raw).unwrap();
 }
 
@@ -475,12 +740,31 @@ async fn nonces_differ_between_calls() {
     let w = wallet();
     let build = || async {
         let b64 = x402::build_payment(
-            &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-            None, None, false, None, None, None,
-        ).await.unwrap();
-        let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            &w,
+            8453,
+            "base",
+            x402::PaymentParams {
+                pay_to: PAY_TO,
+                token_addr: USDC_BASE,
+                amount: "7000",
+                token_name: None,
+                token_version: None,
+                v2: false,
+                resource_url: None,
+                max_timeout_seconds: None,
+                accepted_json: None,
+            },
+        )
+        .await
+        .unwrap();
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap();
         let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-        p["payload"]["authorization"]["nonce"].as_str().unwrap().to_string()
+        p["payload"]["authorization"]["nonce"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
     let n1 = build().await;
     let n2 = build().await;
@@ -500,17 +784,34 @@ async fn max_timeout_seconds_bounds_v1_validity_window_too() {
     let before = now();
     let w = wallet();
     let b64 = x402::build_payment(
-        &w, 8453, "base", PAY_TO, USDC_BASE, "7000",
-        None, None, false, None, Some(300), None,
+        &w,
+        8453,
+        "base",
+        x402::PaymentParams {
+            pay_to: PAY_TO,
+            token_addr: USDC_BASE,
+            amount: "7000",
+            token_name: None,
+            token_version: None,
+            v2: false,
+            resource_url: None,
+            max_timeout_seconds: Some(300),
+            accepted_json: None,
+        },
     )
     .await
     .unwrap();
     let after = now();
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap();
     let p: serde_json::Value = serde_json::from_slice(&raw).unwrap();
 
     let vb: u64 = p["payload"]["authorization"]["validBefore"]
-        .as_str().unwrap().parse().unwrap();
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     assert!(
         vb >= before + 300 && vb <= after + 300,
         "v1 validBefore must follow --max-timeout-seconds (was {vb}, window [{before},{after}])"
@@ -527,6 +828,9 @@ async fn max_timeout_seconds_bounds_v1_validity_window_too() {
 fn caip2_mapping() {
     assert_eq!(evm::caip2_for_network("base").unwrap(), "eip155:8453");
     assert_eq!(evm::caip2_for_network("ethereum").unwrap(), "eip155:1");
-    assert_eq!(evm::caip2_for_network("base-sepolia").unwrap(), "eip155:84532");
+    assert_eq!(
+        evm::caip2_for_network("base-sepolia").unwrap(),
+        "eip155:84532"
+    );
     assert!(evm::caip2_for_network("solana").is_err());
 }

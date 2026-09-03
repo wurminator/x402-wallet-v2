@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 
 pub fn home_dir() -> Result<PathBuf> {
     #[cfg(windows)]
@@ -17,6 +17,8 @@ pub fn home_dir() -> Result<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        env::var("HOME").map(PathBuf::from).map_err(|_| anyhow!("no $HOME"))
+        env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| anyhow!("no $HOME"))
     }
 }
