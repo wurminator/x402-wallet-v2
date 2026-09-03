@@ -170,11 +170,16 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         write_private(&path, content.as_bytes())?;
         println!("Private key stored in {}", path.display());
     } else {
-        let pass = prompt_password("Set keystore passphrase: ")?;
-        let pass_confirm = prompt_password("Confirm passphrase: ")?;
-        if pass != pass_confirm {
-            return Err(anyhow!("passphrases do not match"));
-        }
+        let pass = if let Ok(p) = env::var("X402_KEYSTORE_PASSWORD") {
+            p
+        } else {
+            let p = prompt_password("Set keystore passphrase: ")?;
+            let pass_confirm = prompt_password("Confirm passphrase: ")?;
+            if p != pass_confirm {
+                return Err(anyhow!("passphrases do not match"));
+            }
+            p
+        };
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
         let mut key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
@@ -237,7 +242,11 @@ async fn load_private_key_hex() -> Result<String> {
     if path.exists() {
         let data = fs::read(path)?;
         let ks: FileKeystore = serde_json::from_slice(&data)?;
-        let pass = prompt_password("Unlock keystore passphrase: ")?;
+        let pass = if let Ok(p) = env::var("X402_KEYSTORE_PASSWORD") {
+            p
+        } else {
+            prompt_password("Unlock keystore passphrase: ")?
+        };
         // Use the parameters recorded in the file — pre-hardening files
         // deserialize with the legacy defaults, so they keep decrypting
         let mut key_bytes = derive_key(
