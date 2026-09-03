@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
-    XChaCha20Poly1305, Key, XNonce,
+    Key, XChaCha20Poly1305, XNonce,
 };
 use dotenvy::dotenv_override;
 use rand::{rngs::OsRng, RngCore};
@@ -48,9 +48,15 @@ struct FileKeystore {
     p_cost: u32,
 }
 
-fn legacy_m_cost() -> u32 { LEGACY_M_COST }
-fn legacy_t_cost() -> u32 { LEGACY_T_COST }
-fn legacy_p_cost() -> u32 { LEGACY_P_COST }
+fn legacy_m_cost() -> u32 {
+    LEGACY_M_COST
+}
+fn legacy_t_cost() -> u32 {
+    LEGACY_T_COST
+}
+fn legacy_p_cost() -> u32 {
+    LEGACY_P_COST
+}
 
 /// Derives the 32-byte encryption key from the passphrase via Argon2id
 /// with explicitly given cost parameters.
@@ -108,11 +114,16 @@ fn write_private(path: &std::path::Path, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub struct WalletContext { pub wallet: PrivateKeySigner, pub address: Address }
+pub struct WalletContext {
+    pub wallet: PrivateKeySigner,
+    pub address: Address,
+}
 
 fn app_path() -> Result<PathBuf> {
-    let mut p = home_dir()?; p.push(APP_DIR);
-    fs::create_dir_all(&p)?; Ok(p)
+    let mut p = home_dir()?;
+    p.push(APP_DIR);
+    fs::create_dir_all(&p)?;
+    Ok(p)
 }
 
 pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result<()> {
@@ -123,7 +134,8 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         format!("0x{}", hex::encode(secret_bytes))
     } else {
         println!("Paste 0x-prefixed 32-byte hex private key (input hidden):");
-        let pasted = prompt_password("private key: ")?; normalize_pk(&pasted)?
+        let pasted = prompt_password("private key: ")?;
+        normalize_pk(&pasted)?
     };
 
     if !keystore {
@@ -160,11 +172,15 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
     } else {
         let pass = prompt_password("Set keystore passphrase: ")?;
         let pass_confirm = prompt_password("Confirm passphrase: ")?;
-        if pass != pass_confirm { return Err(anyhow!("passphrases do not match")); }
-        let mut salt = [0u8; 16]; OsRng.fill_bytes(&mut salt);
+        if pass != pass_confirm {
+            return Err(anyhow!("passphrases do not match"));
+        }
+        let mut salt = [0u8; 16];
+        OsRng.fill_bytes(&mut salt);
         let mut key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
         let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
-        let mut nonce = [0u8; 24]; OsRng.fill_bytes(&mut nonce);
+        let mut nonce = [0u8; 24];
+        OsRng.fill_bytes(&mut nonce);
         let ct = cipher.encrypt(XNonce::from_slice(&nonce), pk_hex.as_bytes())?;
         let ks = FileKeystore {
             salt: hex::encode(salt),
@@ -174,9 +190,11 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
             t_cost: KDF_T_COST,
             p_cost: KDF_P_COST,
         };
-        let mut path = app_path()?; path.push(KEYSTORE);
+        let mut path = app_path()?;
+        path.push(KEYSTORE);
         write_private(&path, &serde_json::to_vec_pretty(&ks)?)?;
-        let mut pass = pass; pass.zeroize();
+        let mut pass = pass;
+        pass.zeroize();
     }
 
     let wallet = PrivateKeySigner::from_str(&pk_hex)?;
@@ -185,9 +203,11 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
 }
 
 fn prompt(s: &str) -> Result<String> {
-    use std::io::{Write};
-    print!("{s}"); std::io::stdout().flush()?;
-    let mut buf = String::new(); std::io::stdin().read_line(&mut buf)?;
+    use std::io::Write;
+    print!("{s}");
+    std::io::stdout().flush()?;
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf)?;
     Ok(buf.trim().to_string())
 }
 
@@ -195,18 +215,25 @@ fn normalize_pk(input: &str) -> Result<String> {
     let mut s = input.trim().trim_matches('"').to_string();
     if s.starts_with("0x") || s.starts_with("0X") {
         s.make_ascii_lowercase();
-        if s.len() != 66 { return Err(anyhow!("expected 32-byte hex (66 chars incl 0x)")); }
+        if s.len() != 66 {
+            return Err(anyhow!("expected 32-byte hex (66 chars incl 0x)"));
+        }
         Ok(s)
     } else {
-        if s.len() != 64 { return Err(anyhow!("expected 32-byte hex (64 chars)")); }
+        if s.len() != 64 {
+            return Err(anyhow!("expected 32-byte hex (64 chars)"));
+        }
         Ok(format!("0x{}", s.to_lowercase()))
     }
 }
 
 async fn load_private_key_hex() -> Result<String> {
     let _ = dotenv_override();
-    if let Ok(m) = env::var("X402_WALLET_PRIVATE_KEY") { return normalize_pk(&m); }
-    let mut path = app_path()?; path.push(KEYSTORE);
+    if let Ok(m) = env::var("X402_WALLET_PRIVATE_KEY") {
+        return normalize_pk(&m);
+    }
+    let mut path = app_path()?;
+    path.push(KEYSTORE);
     if path.exists() {
         let data = fs::read(path)?;
         let ks: FileKeystore = serde_json::from_slice(&data)?;
@@ -221,18 +248,27 @@ async fn load_private_key_hex() -> Result<String> {
             ks.p_cost,
         )?;
         let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
-        let pt = cipher.decrypt(XNonce::from_slice(&hex::decode(ks.nonce)?), &hex::decode(ks.ct)?[..])?;
-        let mut pass = pass; pass.zeroize();
+        let pt = cipher.decrypt(
+            XNonce::from_slice(&hex::decode(ks.nonce)?),
+            &hex::decode(ks.ct)?[..],
+        )?;
+        let mut pass = pass;
+        pass.zeroize();
         let s = String::from_utf8(pt)?;
         return normalize_pk(&s);
     }
-    Err(anyhow!("No private key. Use `x402-wallet wallet-init` or set X402_WALLET_PRIVATE_KEY in .env"))
+    Err(anyhow!(
+        "No private key. Use `x402-wallet wallet-init` or set X402_WALLET_PRIVATE_KEY in .env"
+    ))
 }
 
 pub async fn load_wallet_context() -> Result<WalletContext> {
     let pk = load_private_key_hex().await?;
     let wallet = PrivateKeySigner::from_str(&pk)?;
-    Ok(WalletContext { address: wallet.address(), wallet })
+    Ok(WalletContext {
+        address: wallet.address(),
+        wallet,
+    })
 }
 
 #[cfg(test)]
@@ -263,10 +299,22 @@ mod tests {
 
     #[test]
     fn rfc9106_params_derive_deterministically() {
-        let a = derive_key(b"pass", b"0123456789abcdef", KDF_M_COST, KDF_T_COST, KDF_P_COST)
-            .unwrap();
-        let b = derive_key(b"pass", b"0123456789abcdef", KDF_M_COST, KDF_T_COST, KDF_P_COST)
-            .unwrap();
+        let a = derive_key(
+            b"pass",
+            b"0123456789abcdef",
+            KDF_M_COST,
+            KDF_T_COST,
+            KDF_P_COST,
+        )
+        .unwrap();
+        let b = derive_key(
+            b"pass",
+            b"0123456789abcdef",
+            KDF_M_COST,
+            KDF_T_COST,
+            KDF_P_COST,
+        )
+        .unwrap();
         assert_eq!(a, b);
     }
 
@@ -291,9 +339,7 @@ mod tests {
         let nonce = [9u8; 24];
         let key = derive_key(pass, &salt, m, t, p).unwrap();
         let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
-        let ct = cipher
-            .encrypt(XNonce::from_slice(&nonce), plain)
-            .unwrap();
+        let ct = cipher.encrypt(XNonce::from_slice(&nonce), plain).unwrap();
         FileKeystore {
             salt: hex::encode(salt),
             nonce: hex::encode(nonce),
@@ -308,7 +354,13 @@ mod tests {
     /// recorded in the file (after JSON roundtrip)
     fn unseal(ks: &FileKeystore, pass: &[u8]) -> Result<Vec<u8>> {
         let re: FileKeystore = serde_json::from_str(&serde_json::to_string(ks).unwrap()).unwrap();
-        let key = derive_key(pass, &hex::decode(re.salt)?, re.m_cost, re.t_cost, re.p_cost)?;
+        let key = derive_key(
+            pass,
+            &hex::decode(re.salt)?,
+            re.m_cost,
+            re.t_cost,
+            re.p_cost,
+        )?;
         let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
         Ok(cipher.decrypt(
             XNonce::from_slice(&hex::decode(re.nonce)?),
@@ -326,14 +378,23 @@ mod tests {
     fn pre_hardening_file_without_params_still_decrypts() {
         // Simulates a pre-hardening keystore: encrypted with the legacy
         // Argon2::default() parameters, parameter fields absent from JSON
-        let ks = seal(b"0xlegacy", b"pw", LEGACY_M_COST, LEGACY_T_COST, LEGACY_P_COST);
+        let ks = seal(
+            b"0xlegacy",
+            b"pw",
+            LEGACY_M_COST,
+            LEGACY_T_COST,
+            LEGACY_P_COST,
+        );
         let mut v = serde_json::to_value(&ks).unwrap();
         let obj = v.as_object_mut().unwrap();
         obj.remove("m_cost");
         obj.remove("t_cost");
         obj.remove("p_cost");
         let stripped: FileKeystore = serde_json::from_value(v).unwrap();
-        assert_eq!((stripped.m_cost, stripped.t_cost, stripped.p_cost), (19456, 2, 1));
+        assert_eq!(
+            (stripped.m_cost, stripped.t_cost, stripped.p_cost),
+            (19456, 2, 1)
+        );
         assert_eq!(unseal(&stripped, b"pw").unwrap(), b"0xlegacy");
     }
 

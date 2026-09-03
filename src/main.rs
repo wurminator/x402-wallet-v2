@@ -118,9 +118,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Cmd::WalletInit { dotenv, keystore } => {
-            store::init_wallet(dotenv, keystore).await
-        }
+        Cmd::WalletInit { dotenv, keystore } => store::init_wallet(dotenv, keystore).await,
 
         Cmd::WalletAddress => {
             let ctx = store::load_wallet_context().await?;
@@ -183,20 +181,19 @@ async fn main() -> Result<()> {
             // the authoritative chain ID then flows into the EIP-712 domain
             let chain_id = evm::http_provider().await?.get_chain_id().await?;
 
-            let header = x402::create_payment(
-                chain_id,
-                &ctx.wallet,
-                &pay_to,
-                &token,
-                &amount,
-                token_name.as_deref(),
-                token_version.as_deref(),
+            let params = x402::PaymentParams {
+                pay_to: &pay_to,
+                token_addr: &token,
+                amount: &amount,
+                token_name: token_name.as_deref(),
+                token_version: token_version.as_deref(),
                 v2,
-                resource_url.as_deref(),
+                resource_url: resource_url.as_deref(),
                 max_timeout_seconds,
-                accepted.as_deref(),
-            )
-            .await?;
+                accepted_json: accepted.as_deref(),
+            };
+
+            let header = x402::create_payment(chain_id, &ctx.wallet, params).await?;
 
             // Output only the base64 header to stdout (no extra text)
             println!("{}", header);
