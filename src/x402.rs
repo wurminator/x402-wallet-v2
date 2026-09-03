@@ -199,7 +199,7 @@ pub async fn build_payment(
     // official client signs. validBefore bounds the window anyway.
     let timeout = max_timeout_seconds.unwrap_or(600);
     let valid_after = 0u64;
-    let valid_before = unix_time() + timeout;
+    let valid_before = unix_time()? + timeout;
 
     // Generate random nonce
     let mut nonce = [0u8; 32];
@@ -289,9 +289,8 @@ pub async fn build_payment(
 }
 
 /// Returns current Unix timestamp in seconds
-fn unix_time() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
-        .as_secs()
+fn unix_time() -> Result<u64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_secs())
 }
