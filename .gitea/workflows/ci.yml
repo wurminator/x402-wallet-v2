@@ -1,0 +1,51 @@
+name: CI (Gitea)
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build & Test (stable)
+    runs-on: rust-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain info
+        run: rustc --version && cargo --version
+
+      - name: Build (no system OpenSSL needed — rustls only)
+        run: cargo build --release
+
+      - name: Run tests (offline, no funds involved)
+        run: cargo test
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true # enable once existing warnings are cleaned up
+
+      - name: Format check
+        run: cargo fmt --check
+        continue-on-error: true # enable once formatting is applied repo-wide
+
+  # Windows-Smoke-Build bleibt auf GitHub Actions (kein Windows-Runner auf ryze).
+  # Wenn dieser Job hier aktiviert werden soll: Windows-Runner bereitstellen
+  # und das if: false entfernen.
+  build-windows:
+    if: false
+    name: Smoke Build (windows)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: cargo build
+        run: cargo build --release
