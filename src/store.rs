@@ -11,7 +11,7 @@ use rand::{rngs::OsRng, RngCore};
 use rpassword::prompt_password;
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf, str::FromStr};
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::utils::home_dir; // <— fixed module path
 
@@ -170,15 +170,15 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         write_private(&path, content.as_bytes())?;
         println!("Private key stored in {}", path.display());
     } else {
-        let pass = prompt_password("Set keystore passphrase: ")?;
-        let pass_confirm = prompt_password("Confirm passphrase: ")?;
-        if pass != pass_confirm {
+        let pass = Zeroizing::new(prompt_password("Set keystore passphrase: ")?);
+        let pass_confirm = Zeroizing::new(prompt_password("Confirm passphrase: ")?);
+        if *pass != *pass_confirm {
             return Err(anyhow!("passphrases do not match"));
         }
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
-        let key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let key_bytes = Zeroizing::new(derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?);
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes.as_ref()));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
         let ct = cipher.encrypt(XNonce::from_slice(&nonce), pk_hex.as_bytes())?;
@@ -193,8 +193,6 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let mut path = app_path()?;
         path.push(KEYSTORE);
         write_private(&path, &serde_json::to_vec_pretty(&ks)?)?;
-        let mut pass = pass;
-        pass.zeroize();
     }
 
     let wallet = PrivateKeySigner::from_str(&pk_hex)?;
@@ -237,24 +235,27 @@ async fn load_private_key_hex() -> Result<String> {
     if path.exists() {
         let data = fs::read(path)?;
         let ks: FileKeystore = serde_json::from_slice(&data)?;
-        let pass = prompt_password("Unlock keystore passphrase: ")?;
+        let pass = Zeroizing::new(if let Ok(p) = env::var("X402_KEYSTORE_PASSWORD") {
+            p
+        } else {
+            prompt_password("Unlock keystore passphrase: ")?
+        });
         // Use the parameters recorded in the file — pre-hardening files
         // deserialize with the legacy defaults, so they keep decrypting
-        let key_bytes = derive_key(
+        let key_bytes = Zeroizing::new(derive_key(
             pass.as_bytes(),
             &hex::decode(ks.salt)?,
             ks.m_cost,
             ks.t_cost,
             ks.p_cost,
-        )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        )?);
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes.as_ref()));
         let pt = cipher.decrypt(
             XNonce::from_slice(&hex::decode(ks.nonce)?),
             &hex::decode(ks.ct)?[..],
         )?;
-        let mut pass = pass;
-        pass.zeroize();
-        let s = String::from_utf8(pt)?;
+        // Convert to string and wrap in Zeroizing, zeroizing the original Vec as well
+        let s = Zeroizing::new(String::from_utf8(pt)?);
         return normalize_pk(&s);
     }
     Err(anyhow!(

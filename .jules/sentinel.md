@@ -1,0 +1,4 @@
+## 2026-09-04 - Keystore Automation and Password Memory Leaks
+**Vulnerability:** Keystore mode required interactive passphrase prompts, forcing AI agents to use plaintext .env files (storing private keys in plaintext). Additionally, early returns (e.g. from invalid keystores or password mismatches) leaked the entered passphrases in memory because they were not properly zeroized before the drop.
+**Learning:** Relying on interactive inputs for automation restricts users to insecure workarounds. Rust's drop semantics mean sensitive data (like passwords) must be proactively zeroized, especially since early returns skip manual cleanup code.
+**Prevention:** Use environment variables (like X402_KEYSTORE_PASSWORD) to enable non-interactive use of secure storage. Use Drop wrappers like zeroize::Zeroizing<String> for all sensitive data to guarantee cleanup regardless of control flow.
