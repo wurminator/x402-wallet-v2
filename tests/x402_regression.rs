@@ -93,7 +93,7 @@ async fn build_v2(accepted_json: Option<&str>, max_timeout: Option<u64>) -> serd
             v2: true,
             resource_url: Some("https://api.exa.ai/search"),
             max_timeout_seconds: max_timeout,
-            accepted_json: accepted_json,
+            accepted_json,
         },
     )
     .await

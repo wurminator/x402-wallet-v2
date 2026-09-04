@@ -174,7 +174,7 @@ fn validate_rpc_url(url: &Url) -> Result<()> {
 }
 
 /// Create HTTP provider for configured network (validates chain ID)
-pub async fn http_provider() -> Result<impl Provider<Ethereum> + Clone + Send + Sync + 'static> {
+pub async fn http_provider() -> Result<impl Provider<Ethereum> + Clone + 'static> {
     let (url, net, expected_chain) = rpc_url_and_expected_chain().await?;
 
     let provider = ProviderBuilder::new().connect_http(url);
@@ -196,7 +196,7 @@ pub async fn http_provider() -> Result<impl Provider<Ethereum> + Clone + Send + 
 /// Create provider with wallet signer
 pub async fn provider_with_wallet(
     wallet: alloy::signers::local::PrivateKeySigner,
-) -> Result<impl Provider<Ethereum> + Clone + Send + Sync + 'static> {
+) -> Result<impl Provider<Ethereum> + Clone + 'static> {
     let (url, net, expected_chain) = rpc_url_and_expected_chain().await?;
 
     let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);

@@ -236,7 +236,7 @@ pub async fn build_payment(
             } else {
                 serde_json::to_value(AcceptedRequirements {
                     scheme: "exact".to_string(),
-                    network: crate::evm::caip2_for_network(&network)?,
+                    network: crate::evm::caip2_for_network(network)?,
                     amount: value.to_string(),
                     // Echo asset/payTo VERBATIM (checksummed) — servers validate the
                     // echo with a case-sensitive deepEqual against the 402 response;

@@ -177,7 +177,7 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         }
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
-        let mut key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
+        let key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
         let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
@@ -240,7 +240,7 @@ async fn load_private_key_hex() -> Result<String> {
         let pass = prompt_password("Unlock keystore passphrase: ")?;
         // Use the parameters recorded in the file — pre-hardening files
         // deserialize with the legacy defaults, so they keep decrypting
-        let mut key_bytes = derive_key(
+        let key_bytes = derive_key(
             pass.as_bytes(),
             &hex::decode(ks.salt)?,
             ks.m_cost,
