@@ -11,7 +11,7 @@ use rand::{rngs::OsRng, RngCore};
 use rpassword::prompt_password;
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf, str::FromStr};
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::utils::home_dir; // <— fixed module path
 
@@ -60,13 +60,13 @@ fn legacy_p_cost() -> u32 {
 
 /// Derives the 32-byte encryption key from the passphrase via Argon2id
 /// with explicitly given cost parameters.
-fn derive_key(pass: &[u8], salt: &[u8], m_cost: u32, t_cost: u32, p_cost: u32) -> Result<[u8; 32]> {
+fn derive_key(pass: &[u8], salt: &[u8], m_cost: u32, t_cost: u32, p_cost: u32) -> Result<Zeroizing<[u8; 32]>> {
     let params = Params::new(m_cost, t_cost, p_cost, Some(32))
         .map_err(|e| anyhow!("argon2 params: {}", e))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = [0u8; 32];
+    let mut key = Zeroizing::new([0u8; 32]);
     argon
-        .hash_password_into(pass, salt, &mut key)
+        .hash_password_into(pass, salt, &mut *key)
         .map_err(|e| anyhow!("argon2: {}", e))?;
     Ok(key)
 }
@@ -170,15 +170,22 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         write_private(&path, content.as_bytes())?;
         println!("Private key stored in {}", path.display());
     } else {
-        let pass = prompt_password("Set keystore passphrase: ")?;
-        let pass_confirm = prompt_password("Confirm passphrase: ")?;
-        if pass != pass_confirm {
-            return Err(anyhow!("passphrases do not match"));
+        let pass = Zeroizing::new(match env::var("X402_KEYSTORE_PASSWORD") {
+            Ok(p) => p,
+            Err(_) => prompt_password("Set keystore passphrase: ")?,
+        });
+
+        if env::var("X402_KEYSTORE_PASSWORD").is_err() {
+            let pass_confirm = Zeroizing::new(prompt_password("Confirm passphrase: ")?);
+            if *pass != *pass_confirm {
+                return Err(anyhow!("passphrases do not match"));
+            }
         }
+
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
         let key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(&*key_bytes));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
         let ct = cipher.encrypt(XNonce::from_slice(&nonce), pk_hex.as_bytes())?;
@@ -193,8 +200,6 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let mut path = app_path()?;
         path.push(KEYSTORE);
         write_private(&path, &serde_json::to_vec_pretty(&ks)?)?;
-        let mut pass = pass;
-        pass.zeroize();
     }
 
     let wallet = PrivateKeySigner::from_str(&pk_hex)?;
@@ -237,7 +242,10 @@ async fn load_private_key_hex() -> Result<String> {
     if path.exists() {
         let data = fs::read(path)?;
         let ks: FileKeystore = serde_json::from_slice(&data)?;
-        let pass = prompt_password("Unlock keystore passphrase: ")?;
+        let pass = Zeroizing::new(match env::var("X402_KEYSTORE_PASSWORD") {
+            Ok(p) => p,
+            Err(_) => prompt_password("Unlock keystore passphrase: ")?,
+        });
         // Use the parameters recorded in the file — pre-hardening files
         // deserialize with the legacy defaults, so they keep decrypting
         let key_bytes = derive_key(
@@ -247,13 +255,11 @@ async fn load_private_key_hex() -> Result<String> {
             ks.t_cost,
             ks.p_cost,
         )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(&*key_bytes));
         let pt = cipher.decrypt(
             XNonce::from_slice(&hex::decode(ks.nonce)?),
             &hex::decode(ks.ct)?[..],
         )?;
-        let mut pass = pass;
-        pass.zeroize();
         let s = String::from_utf8(pt)?;
         return normalize_pk(&s);
     }
@@ -293,8 +299,8 @@ mod tests {
         let a = derive_key(b"pass", b"0123456789abcdef", 64, 1, 1).unwrap();
         let b = derive_key(b"pass", b"0123456789abcdef", 64, 2, 1).unwrap();
         let c = derive_key(b"pass", b"0123456789abcdef", 64, 1, 2).unwrap();
-        assert_ne!(a, b);
-        assert_ne!(a, c);
+        assert_ne!(*a, *b);
+        assert_ne!(*a, *c);
     }
 
     #[test]
@@ -315,7 +321,7 @@ mod tests {
             KDF_P_COST,
         )
         .unwrap();
-        assert_eq!(a, b);
+        assert_eq!(*a, *b);
     }
 
     #[test]
@@ -338,7 +344,7 @@ mod tests {
         let salt = [7u8; 16];
         let nonce = [9u8; 24];
         let key = derive_key(pass, &salt, m, t, p).unwrap();
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(&*key));
         let ct = cipher.encrypt(XNonce::from_slice(&nonce), plain).unwrap();
         FileKeystore {
             salt: hex::encode(salt),
@@ -361,7 +367,7 @@ mod tests {
             re.t_cost,
             re.p_cost,
         )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(&*key));
         Ok(cipher.decrypt(
             XNonce::from_slice(&hex::decode(re.nonce)?),
             &hex::decode(re.ct)?[..],
