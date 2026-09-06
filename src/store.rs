@@ -60,13 +60,19 @@ fn legacy_p_cost() -> u32 {
 
 /// Derives the 32-byte encryption key from the passphrase via Argon2id
 /// with explicitly given cost parameters.
-fn derive_key(pass: &[u8], salt: &[u8], m_cost: u32, t_cost: u32, p_cost: u32) -> Result<[u8; 32]> {
+fn derive_key(
+    pass: &[u8],
+    salt: &[u8],
+    m_cost: u32,
+    t_cost: u32,
+    p_cost: u32,
+) -> Result<zeroize::Zeroizing<[u8; 32]>> {
     let params = Params::new(m_cost, t_cost, p_cost, Some(32))
         .map_err(|e| anyhow!("argon2 params: {}", e))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = [0u8; 32];
+    let mut key = zeroize::Zeroizing::new([0u8; 32]);
     argon
-        .hash_password_into(pass, salt, &mut key)
+        .hash_password_into(pass, salt, &mut *key)
         .map_err(|e| anyhow!("argon2: {}", e))?;
     Ok(key)
 }
@@ -178,7 +184,7 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
         let key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes.as_ref()));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
         let ct = cipher.encrypt(XNonce::from_slice(&nonce), pk_hex.as_bytes())?;
@@ -247,7 +253,7 @@ async fn load_private_key_hex() -> Result<String> {
             ks.t_cost,
             ks.p_cost,
         )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes.as_ref()));
         let pt = cipher.decrypt(
             XNonce::from_slice(&hex::decode(ks.nonce)?),
             &hex::decode(ks.ct)?[..],
@@ -293,8 +299,8 @@ mod tests {
         let a = derive_key(b"pass", b"0123456789abcdef", 64, 1, 1).unwrap();
         let b = derive_key(b"pass", b"0123456789abcdef", 64, 2, 1).unwrap();
         let c = derive_key(b"pass", b"0123456789abcdef", 64, 1, 2).unwrap();
-        assert_ne!(a, b);
-        assert_ne!(a, c);
+        assert_ne!(*a, *b);
+        assert_ne!(*a, *c);
     }
 
     #[test]
@@ -315,7 +321,7 @@ mod tests {
             KDF_P_COST,
         )
         .unwrap();
-        assert_eq!(a, b);
+        assert_eq!(*a, *b);
     }
 
     #[test]
@@ -338,7 +344,7 @@ mod tests {
         let salt = [7u8; 16];
         let nonce = [9u8; 24];
         let key = derive_key(pass, &salt, m, t, p).unwrap();
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
         let ct = cipher.encrypt(XNonce::from_slice(&nonce), plain).unwrap();
         FileKeystore {
             salt: hex::encode(salt),
@@ -361,7 +367,7 @@ mod tests {
             re.t_cost,
             re.p_cost,
         )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
         Ok(cipher.decrypt(
             XNonce::from_slice(&hex::decode(re.nonce)?),
             &hex::decode(re.ct)?[..],
