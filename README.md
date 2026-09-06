@@ -203,7 +203,7 @@ Stored at `~/.x402wallet/config.json` (Windows: `%USERPROFILE%\.x402wallet\confi
 {
   "network": "base",
   "rpc": {
-    "ethereum": "https://cloudflare-eth.com",
+    "ethereum": "https://ethereum-rpc.publicnode.com",
     "base": "https://mainnet.base.org",
     "base-sepolia": "https://sepolia.base.org",
     "polygon": "https://polygon-bor-rpc.publicnode.com"
@@ -213,7 +213,7 @@ Stored at `~/.x402wallet/config.json` (Windows: `%USERPROFILE%\.x402wallet\confi
 
 | Network | Chain ID | CAIP-2 (v2) | Default RPC | Aliases |
 |---------|----------|-------------|-------------|---------|
-| Ethereum | 1 | `eip155:1` | `https://cloudflare-eth.com` | `eth` |
+| Ethereum | 1 | `eip155:1` | `https://ethereum-rpc.publicnode.com` | `eth` |
 | Base *(default)* | 8453 | `eip155:8453` | `https://mainnet.base.org` | — |
 | Base Sepolia | 84532 | `eip155:84532` | `https://sepolia.base.org` | `base_sepolia`, `base-sepolia-testnet` |
 | Polygon | 137 | `eip155:137` | `https://polygon-bor-rpc.publicnode.com` | `matic` |
