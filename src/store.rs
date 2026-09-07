@@ -178,10 +178,11 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
         let key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let cipher = XChaCha20Poly1305::new(&Key::from(key_bytes));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
-        let ct = cipher.encrypt(XNonce::from_slice(&nonce), pk_hex.as_bytes())?;
+        let ct = cipher
+            .encrypt(&XNonce::from(nonce), pk_hex.as_bytes())?;
         let ks = FileKeystore {
             salt: hex::encode(salt),
             nonce: hex::encode(nonce),
@@ -247,11 +248,11 @@ async fn load_private_key_hex() -> Result<String> {
             ks.t_cost,
             ks.p_cost,
         )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
-        let pt = cipher.decrypt(
-            XNonce::from_slice(&hex::decode(ks.nonce)?),
-            &hex::decode(ks.ct)?[..],
-        )?;
+        let cipher = XChaCha20Poly1305::new(&Key::from(key_bytes));
+        let nonce: [u8; 24] = hex::decode(ks.nonce)?
+            .try_into()
+            .map_err(|_| anyhow!("corrupt keystore: nonce is not 24 bytes"))?;
+        let pt = cipher.decrypt(&XNonce::from(nonce), &hex::decode(ks.ct)?[..])?;
         let mut pass = pass;
         pass.zeroize();
         let s = String::from_utf8(pt)?;
@@ -338,8 +339,8 @@ mod tests {
         let salt = [7u8; 16];
         let nonce = [9u8; 24];
         let key = derive_key(pass, &salt, m, t, p).unwrap();
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
-        let ct = cipher.encrypt(XNonce::from_slice(&nonce), plain).unwrap();
+        let cipher = XChaCha20Poly1305::new(&Key::from(key));
+        let ct = cipher.encrypt(&XNonce::from(nonce), plain).unwrap();
         FileKeystore {
             salt: hex::encode(salt),
             nonce: hex::encode(nonce),
@@ -361,11 +362,11 @@ mod tests {
             re.t_cost,
             re.p_cost,
         )?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
-        Ok(cipher.decrypt(
-            XNonce::from_slice(&hex::decode(re.nonce)?),
-            &hex::decode(re.ct)?[..],
-        )?)
+        let cipher = XChaCha20Poly1305::new(&Key::from(key));
+        let nonce: [u8; 24] = hex::decode(re.nonce)?
+            .try_into()
+            .map_err(|_| anyhow!("corrupt keystore: nonce is not 24 bytes"))?;
+        Ok(cipher.decrypt(&XNonce::from(nonce), &hex::decode(re.ct)?[..])?)
     }
 
     #[test]
