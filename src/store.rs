@@ -122,7 +122,17 @@ pub struct WalletContext {
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(APP_DIR);
-    fs::create_dir_all(&p)?;
+    // SECURITY: Create the app directory with restricted permissions (0o700).
+    // This directory stores highly sensitive material including the encrypted
+    // keystore which protects the user's private key.
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(&p)?;
     Ok(p)
 }
 
@@ -181,8 +191,7 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let cipher = XChaCha20Poly1305::new(&Key::from(key_bytes));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
-        let ct = cipher
-            .encrypt(&XNonce::from(nonce), pk_hex.as_bytes())?;
+        let ct = cipher.encrypt(&XNonce::from(nonce), pk_hex.as_bytes())?;
         let ks = FileKeystore {
             salt: hex::encode(salt),
             nonce: hex::encode(nonce),
