@@ -250,7 +250,7 @@ For a v2 server the flow is identical, except:
 {
   "network": "base",
   "rpc": {
-    "ethereum": "https://cloudflare-eth.com",
+    "ethereum": "https://ethereum-rpc.publicnode.com",
     "base": "https://mainnet.base.org",
     "base-sepolia": "https://sepolia.base.org",
     "polygon": "https://polygon-bor-rpc.publicnode.com"

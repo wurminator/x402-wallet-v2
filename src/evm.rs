@@ -36,7 +36,7 @@ fn cfg_path() -> Result<PathBuf> {
 /// Default RPC endpoints for supported networks
 fn default_rpc_map() -> HashMap<String, String> {
     let mut m = HashMap::new();
-    m.insert("ethereum".into(), "https://cloudflare-eth.com".into());
+    m.insert("ethereum".into(), "https://ethereum-rpc.publicnode.com".into());
     m.insert("base".into(), "https://mainnet.base.org".into());
     m.insert("base-sepolia".into(), "https://sepolia.base.org".into());
     m.insert(
