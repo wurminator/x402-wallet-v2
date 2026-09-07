@@ -232,12 +232,39 @@ sol! {
     }
 }
 
+/// Maps empty contract code to a clean, actionable error. Without this,
+/// the decimals() call on a non-contract address dies with a cryptic
+/// "ABI decoding failed: buffer overrun" Caused-by chain (issue #8).
+fn check_token_contract_code(code: &[u8], token: &str, network: &str) -> Result<()> {
+    if code.is_empty() {
+        Err(anyhow!(
+            "address {token} is not a token contract on network '{network}'.\n\
+             Hint: token contracts differ per network — check the contract address for this chain."
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Fails clearly when `token` holds no code on the configured network
+/// (typo, or a contract address from a different chain)
+async fn ensure_token_contract<P: Provider<Ethereum>>(
+    provider: &P,
+    token: &str,
+) -> Result<()> {
+    let addr = Address::from_str(token)?;
+    let network = load_network().await?.network;
+    let code = provider.get_code_at(addr).await?;
+    check_token_contract_code(&code, token, &network)
+}
+
 /// Get ERC20 token balance for address
 pub async fn erc20_balance<P: Provider<Ethereum> + Clone>(
     provider: &P,
     addr: &Address,
     token: &str,
 ) -> Result<String> {
+    ensure_token_contract(provider, token).await?;
     let token_contract = IERC20::new(Address::from_str(token)?, provider);
     let decimals = token_contract.decimals().call().await?;
     let raw_balance = token_contract.balanceOf(*addr).call().await?;
@@ -276,6 +303,7 @@ pub async fn send_erc20<P: Provider<Ethereum> + Clone + 'static>(
     let token_addr = Address::from_str(token)?;
     let to_addr = Address::from_str(to)?;
 
+    ensure_token_contract(&client, token).await?;
     let contract = IERC20::new(token_addr, client);
     let decimals = contract.decimals().call().await?;
     let raw_amount = match parse_units(amount, decimals)? {
@@ -298,6 +326,26 @@ mod tests {
 
     fn check(url: &str) -> Result<()> {
         validate_rpc_url(&Url::parse(url).unwrap())
+    }
+
+    #[test]
+    fn empty_contract_code_gives_actionable_error() {
+        // Issue #8: a non-contract address must produce ONE clear message,
+        // not the "ABI decoding failed: buffer overrun" Caused-by noise
+        let token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+        let err = check_token_contract_code(&[], token, "polygon")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("is not a token contract on network 'polygon'"), "got: {err}");
+        assert!(err.contains(token), "must echo the address the user passed: {err}");
+        assert!(err.contains("Hint:"), "must carry the per-chain hint: {err}");
+    }
+
+    #[test]
+    fn nonempty_contract_code_passes() {
+        // any deployed bytecode means the contract exists on this chain —
+        // whether it is a sane ERC20 is answered later by decimals()
+        assert!(check_token_contract_code(&[0x60, 0x80, 0x60, 0x40], "0xabc", "base").is_ok());
     }
 
     #[test]
