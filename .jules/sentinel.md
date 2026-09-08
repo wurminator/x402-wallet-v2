@@ -1,0 +1,4 @@
+## 2025-09-08 - Secure Directory Creation
+**Vulnerability:** Insecure directory creation permissions for sensitive data storage (`app_path` in `src/store.rs`). The memory states that we must use `std::fs::DirBuilder` with mode `0o700` when creating directories that store sensitive configurations or keystores.
+**Learning:** `fs::create_dir_all` creates directories with default permissions (often `0o777` minus umask, leaving it `0o755`). Keystore files and private keys are stored in `~/.x402wallet`. Even if the files themselves are restricted (0600), the directory containing them should also be restricted (0700) to prevent unauthorized access or enumeration.
+**Prevention:** Use `std::fs::DirBuilder` with `mode(0o700)` on Unix systems to enforce restricted directory permissions when storing key material.
