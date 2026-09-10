@@ -1,0 +1,4 @@
+## 2024-09-10 - Secure Directory Creation
+**Vulnerability:** The application was creating directories (e.g., the `.x402wallet` directory) using `std::fs::create_dir_all()` without specifying restrictive permissions. This left sensitive files (like configuration and keystores) potentially accessible to other users on the same system depending on the user's umask setting.
+**Learning:** Even if individual sensitive files are created with restrictive permissions (e.g., `0o600`), the directories containing them should also be restricted to prevent unauthorized listing or metadata access. Relying on default `umask` is not sufficient for sensitive data directories.
+**Prevention:** Use `std::fs::DirBuilder` with `mode(0o700)` on Unix systems when creating directories that will store sensitive configurations or keystores.

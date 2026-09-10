@@ -28,7 +28,18 @@ fn cfg_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(".x402wallet/config.json");
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(parent)?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::DirBuilder::new().recursive(true).create(parent)?;
+        }
     }
     Ok(p)
 }
