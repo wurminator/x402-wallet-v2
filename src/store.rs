@@ -122,7 +122,18 @@ pub struct WalletContext {
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(APP_DIR);
-    fs::create_dir_all(&p)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&p)?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(&p)?;
+    }
     Ok(p)
 }
 
