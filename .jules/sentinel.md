@@ -1,0 +1,4 @@
+## 2024-05-24 - [Secure Directory Creation for Sensitive Data]
+**Vulnerability:** Default directory creation via `fs::create_dir_all` allowed default permissions (often `0o755` depending on umask) on directories containing sensitive files like keystores.
+**Learning:** This repo handles highly sensitive information (private keys via keystores) but previously did not strictly enforce restricted permissions on the `app_dir` `.x402wallet`. Any other user on the system could potentially access this folder and the files inside, making the system vulnerable to local file read attacks.
+**Prevention:** Created a utility `secure_create_dir_all` that uses `std::os::unix::fs::DirBuilderExt` to explicitly set `builder.mode(0o700)` on Unix systems when creating directories meant for sensitive configurations or secrets, enforcing owner-only permissions.
