@@ -122,7 +122,7 @@ pub struct WalletContext {
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(APP_DIR);
-    fs::create_dir_all(&p)?;
+    crate::utils::secure_create_dir_all(&p)?;
     Ok(p)
 }
 
@@ -177,8 +177,8 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         }
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
-        let key_bytes = derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?;
-        let cipher = XChaCha20Poly1305::new(&Key::from(key_bytes));
+        let key_bytes = zeroize::Zeroizing::new(derive_key(pass.as_bytes(), &salt, KDF_M_COST, KDF_T_COST, KDF_P_COST)?);
+        let cipher = XChaCha20Poly1305::new(&Key::from(*key_bytes));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
         let ct = cipher
@@ -238,17 +238,20 @@ async fn load_private_key_hex() -> Result<String> {
     if path.exists() {
         let data = fs::read(path)?;
         let ks: FileKeystore = serde_json::from_slice(&data)?;
-        let pass = prompt_password("Unlock keystore passphrase: ")?;
+        let pass = match env::var("X402_KEYSTORE_PASSWORD") {
+            Ok(p) => p,
+            Err(_) => prompt_password("Unlock keystore passphrase: ")?,
+        };
         // Use the parameters recorded in the file — pre-hardening files
         // deserialize with the legacy defaults, so they keep decrypting
-        let key_bytes = derive_key(
+        let key_bytes = zeroize::Zeroizing::new(derive_key(
             pass.as_bytes(),
             &hex::decode(ks.salt)?,
             ks.m_cost,
             ks.t_cost,
             ks.p_cost,
-        )?;
-        let cipher = XChaCha20Poly1305::new(&Key::from(key_bytes));
+        )?);
+        let cipher = XChaCha20Poly1305::new(&Key::from(*key_bytes));
         let nonce: [u8; 24] = hex::decode(ks.nonce)?
             .try_into()
             .map_err(|_| anyhow!("corrupt keystore: nonce is not 24 bytes"))?;
@@ -338,8 +341,8 @@ mod tests {
     fn seal(plain: &[u8], pass: &[u8], m: u32, t: u32, p: u32) -> FileKeystore {
         let salt = [7u8; 16];
         let nonce = [9u8; 24];
-        let key = derive_key(pass, &salt, m, t, p).unwrap();
-        let cipher = XChaCha20Poly1305::new(&Key::from(key));
+        let key = zeroize::Zeroizing::new(derive_key(pass, &salt, m, t, p).unwrap());
+        let cipher = XChaCha20Poly1305::new(&Key::from(*key));
         let ct = cipher.encrypt(&XNonce::from(nonce), plain).unwrap();
         FileKeystore {
             salt: hex::encode(salt),
@@ -355,14 +358,14 @@ mod tests {
     /// recorded in the file (after JSON roundtrip)
     fn unseal(ks: &FileKeystore, pass: &[u8]) -> Result<Vec<u8>> {
         let re: FileKeystore = serde_json::from_str(&serde_json::to_string(ks).unwrap()).unwrap();
-        let key = derive_key(
+        let key = zeroize::Zeroizing::new(derive_key(
             pass,
             &hex::decode(re.salt)?,
             re.m_cost,
             re.t_cost,
             re.p_cost,
-        )?;
-        let cipher = XChaCha20Poly1305::new(&Key::from(key));
+        )?);
+        let cipher = XChaCha20Poly1305::new(&Key::from(*key));
         let nonce: [u8; 24] = hex::decode(re.nonce)?
             .try_into()
             .map_err(|_| anyhow!("corrupt keystore: nonce is not 24 bytes"))?;

@@ -22,3 +22,21 @@ pub fn home_dir() -> Result<PathBuf> {
             .map_err(|_| anyhow!("no $HOME"))
     }
 }
+
+pub fn secure_create_dir_all<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true).mode(0o700);
+        match builder.create(path) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
