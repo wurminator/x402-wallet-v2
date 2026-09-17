@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf, str::FromStr};
 use zeroize::Zeroize;
 
-use crate::utils::home_dir; // <— fixed module path
+use crate::utils::{home_dir, secure_create_dir_all}; // <— fixed module path
 
 const APP_DIR: &str = ".x402wallet";
 const KEYSTORE: &str = "keystore.json";
@@ -122,7 +122,7 @@ pub struct WalletContext {
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(APP_DIR);
-    fs::create_dir_all(&p)?;
+    secure_create_dir_all(&p)?;
     Ok(p)
 }
 

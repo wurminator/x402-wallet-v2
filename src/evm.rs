@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf, str::FromStr};
 use url::Url;
 
-use crate::utils::home_dir;
+use crate::utils::{home_dir, secure_create_dir_all};
 
 /// Network configuration (stored in ~/.x402wallet/config.json)
 #[derive(Serialize, Deserialize, Clone)]
@@ -28,7 +28,7 @@ fn cfg_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(".x402wallet/config.json");
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
+        secure_create_dir_all(parent)?;
     }
     Ok(p)
 }

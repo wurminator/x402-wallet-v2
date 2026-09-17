@@ -1,6 +1,21 @@
 use anyhow::{anyhow, Result};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+pub fn secure_create_dir_all(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        builder.mode(0o700);
+        builder.create(path).map_err(|e| anyhow!("failed to create dir securely: {e}"))
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path).map_err(|e| anyhow!("failed to create dir: {e}"))
+    }
+}
 
 pub fn home_dir() -> Result<PathBuf> {
     #[cfg(windows)]
