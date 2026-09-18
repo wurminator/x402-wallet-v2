@@ -1,0 +1,4 @@
+## 2024-05-24 - Secure Keystore Directory Permissions, Automated Unlocking, and Memory Zeroization
+**Vulnerability:** Keystore app directory (`.x402wallet`) was being created with default permissions instead of restricted permissions (0700). Passwords and derived keys were being zeroized manually at the end of the block, meaning an early return due to the `?` operator could cause memory leaks. Also lacked support for headless automated unlocking.
+**Learning:** In Rust, `zeroize` needs to be applied using `Zeroizing` struct to ensure Drop zeroizes the memory even when the function panics or returns early. Default directory permissions on Unix are too broad (e.g. 0755) and allow local privilege escalation/access for sensitive keys.
+**Prevention:** Always use `zeroize::Zeroizing` over manual `.zeroize()` for secrets in Rust. Always apply explicit strict file/directory permissions (`0o700` for dirs, `0o600` for files) when storing secret data.
