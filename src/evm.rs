@@ -28,7 +28,7 @@ fn cfg_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(".x402wallet/config.json");
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::utils::secure_create_dir_all(parent)?;
     }
     Ok(p)
 }
