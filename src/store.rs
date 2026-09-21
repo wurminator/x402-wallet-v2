@@ -122,7 +122,7 @@ pub struct WalletContext {
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(APP_DIR);
-    fs::create_dir_all(&p)?;
+    crate::utils::secure_create_dir_all(&p)?;
     Ok(p)
 }
 
@@ -170,8 +170,14 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         write_private(&path, content.as_bytes())?;
         println!("Private key stored in {}", path.display());
     } else {
-        let pass = prompt_password("Set keystore passphrase: ")?;
-        let pass_confirm = prompt_password("Confirm passphrase: ")?;
+        let pass = match env::var("X402_KEYSTORE_PASSWORD") {
+            Ok(p) => p,
+            Err(_) => prompt_password("Set keystore passphrase: ")?,
+        };
+        let pass_confirm = match env::var("X402_KEYSTORE_PASSWORD") {
+            Ok(p) => p,
+            Err(_) => prompt_password("Confirm passphrase: ")?,
+        };
         if pass != pass_confirm {
             return Err(anyhow!("passphrases do not match"));
         }
@@ -181,8 +187,7 @@ pub async fn init_wallet(dotenv_path: Option<PathBuf>, keystore: bool) -> Result
         let cipher = XChaCha20Poly1305::new(&Key::from(key_bytes));
         let mut nonce = [0u8; 24];
         OsRng.fill_bytes(&mut nonce);
-        let ct = cipher
-            .encrypt(&XNonce::from(nonce), pk_hex.as_bytes())?;
+        let ct = cipher.encrypt(&XNonce::from(nonce), pk_hex.as_bytes())?;
         let ks = FileKeystore {
             salt: hex::encode(salt),
             nonce: hex::encode(nonce),
@@ -238,7 +243,10 @@ async fn load_private_key_hex() -> Result<String> {
     if path.exists() {
         let data = fs::read(path)?;
         let ks: FileKeystore = serde_json::from_slice(&data)?;
-        let pass = prompt_password("Unlock keystore passphrase: ")?;
+        let pass = match env::var("X402_KEYSTORE_PASSWORD") {
+            Ok(p) => p,
+            Err(_) => prompt_password("Unlock keystore passphrase: ")?,
+        };
         // Use the parameters recorded in the file — pre-hardening files
         // deserialize with the legacy defaults, so they keep decrypting
         let key_bytes = derive_key(

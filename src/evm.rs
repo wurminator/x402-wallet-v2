@@ -28,7 +28,7 @@ fn cfg_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(".x402wallet/config.json");
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::utils::secure_create_dir_all(parent)?;
     }
     Ok(p)
 }
@@ -36,7 +36,10 @@ fn cfg_path() -> Result<PathBuf> {
 /// Default RPC endpoints for supported networks
 fn default_rpc_map() -> HashMap<String, String> {
     let mut m = HashMap::new();
-    m.insert("ethereum".into(), "https://ethereum-rpc.publicnode.com".into());
+    m.insert(
+        "ethereum".into(),
+        "https://ethereum-rpc.publicnode.com".into(),
+    );
     m.insert("base".into(), "https://mainnet.base.org".into());
     m.insert("base-sepolia".into(), "https://sepolia.base.org".into());
     m.insert(
@@ -248,10 +251,7 @@ fn check_token_contract_code(code: &[u8], token: &str, network: &str) -> Result<
 
 /// Fails clearly when `token` holds no code on the configured network
 /// (typo, or a contract address from a different chain)
-async fn ensure_token_contract<P: Provider<Ethereum>>(
-    provider: &P,
-    token: &str,
-) -> Result<()> {
+async fn ensure_token_contract<P: Provider<Ethereum>>(provider: &P, token: &str) -> Result<()> {
     let addr = Address::from_str(token)?;
     let network = load_network().await?.network;
     let code = provider.get_code_at(addr).await?;
@@ -336,9 +336,18 @@ mod tests {
         let err = check_token_contract_code(&[], token, "polygon")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("is not a token contract on network 'polygon'"), "got: {err}");
-        assert!(err.contains(token), "must echo the address the user passed: {err}");
-        assert!(err.contains("Hint:"), "must carry the per-chain hint: {err}");
+        assert!(
+            err.contains("is not a token contract on network 'polygon'"),
+            "got: {err}"
+        );
+        assert!(
+            err.contains(token),
+            "must echo the address the user passed: {err}"
+        );
+        assert!(
+            err.contains("Hint:"),
+            "must carry the per-chain hint: {err}"
+        );
     }
 
     #[test]
