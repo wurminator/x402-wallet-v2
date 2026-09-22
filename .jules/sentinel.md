@@ -1,0 +1,4 @@
+## 2024-05-20 - Insecure Permissions on Configuration/Keystore Directories
+**Vulnerability:** Directories storing sensitive configuration (like `~/.x402wallet` or `~/.config/x402wallet`) were created using standard `std::fs::create_dir_all`, which defaults to the system umask (often `0755` or `0775`). This allowed other users on the system to potentially read or modify these files.
+**Learning:** Rust's standard library does not set restrictive permissions by default. Any directory containing keys or secrets must be explicitly created with strict permissions.
+**Prevention:** Implemented and enforce usage of a `secure_create_dir_all` helper function in `src/utils.rs` that explicitly uses `DirBuilder` and sets mode `0o700` (read/write/execute for owner only) on Unix systems via `std::os::unix::fs::DirBuilderExt`.
