@@ -1,0 +1,4 @@
+## 2024-05-24 - Secure Configuration Directories
+**Vulnerability:** Configuration directories containing sensitive data like keystores and configuration were created using standard `std::fs::create_dir_all`, defaulting to permissive permissions (often 0o755 or 0o775 depending on umask) on Unix. This allowed unauthorized local users to read configuration or encrypted key material if they could access the directory.
+**Learning:** Standard library `create_dir_all` doesn't restrict permissions natively, risking sensitive material exposure on multi-user systems. It's necessary to implement platform-specific directory builder configurations for secure storage.
+**Prevention:** Use the custom `crate::utils::secure_create_dir_all` helper function when creating any application directories that might hold sensitive configurations or key materials to enforce `0o700` permissions on Unix platforms.
