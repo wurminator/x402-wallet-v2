@@ -1,0 +1,4 @@
+## 2024-05-24 - Secure Keystore Directory Creation and Password Zeroization
+**Vulnerability:** The `std::fs::create_dir_all` function in Rust creates directories with default permissions, which on Unix systems means they might be accessible by other users. Additionally, password buffers used to decrypt the keystore were manually zeroized which is error prone if the function early exits, or leaks the plaintext bytes.
+**Learning:** Default permissions are often too permissive for directories holding sensitive keys. Additionally, using standard `String` or `Vec<u8>` to hold plaintext passwords risks leaving sensitive data in memory if an early return happens.
+**Prevention:** Use a custom helper like `secure_create_dir_all` to enforce `0o700` permissions on Unix. Use `zeroize::Zeroizing` around password values to ensure they are cleared from memory automatically when dropped, even on early returns or errors.

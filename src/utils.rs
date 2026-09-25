@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 pub fn home_dir() -> Result<PathBuf> {
@@ -21,4 +23,20 @@ pub fn home_dir() -> Result<PathBuf> {
             .map(PathBuf::from)
             .map_err(|_| anyhow!("no $HOME"))
     }
+}
+
+pub fn secure_create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        builder.mode(0o700);
+        builder.create(path)?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(path)?;
+    }
+    Ok(())
 }
