@@ -2,6 +2,23 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
+use std::fs;
+use std::path::Path;
+
+/// Creates a directory and all of its parent directories with restricted permissions (0o700) on Unix.
+pub fn secure_create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+
+    builder.create(path).map_err(|e| anyhow!("Failed to create directory: {}", e))
+}
+
 pub fn home_dir() -> Result<PathBuf> {
     #[cfg(windows)]
     {
