@@ -1,0 +1,4 @@
+## 2023-10-24 - Insecure Directory Creation Permissions
+**Vulnerability:** Directories meant to store sensitive configurations and keystores (like `.x402wallet/`) were created using standard `std::fs::create_dir_all` which doesn't restrict permissions to the current user (e.g., using default `0o755` permissions instead of `0o700`).
+**Learning:** Even if the files within a directory are secured with strict permissions (like `0o600`), the directory itself might be readable or accessible if created insecurely. We should default to restricting access to the owning user for sensitive application directories.
+**Prevention:** Use `std::os::unix::fs::DirBuilderExt` to explicitly set `0o700` permissions when creating directories that will house sensitive data, ensuring that other users on the system cannot list the directory contents.
