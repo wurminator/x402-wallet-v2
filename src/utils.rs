@@ -2,6 +2,23 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
+use std::fs::DirBuilder;
+use std::path::Path;
+
+/// Recursively creates a directory and all of its parent components if they are missing.
+/// On Unix, this creates directories with `0o700` permissions (read/write/execute for owner only)
+/// to securely store sensitive items such as keystores and configurations.
+pub fn secure_create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
+    let mut builder = DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path).map_err(Into::into)
+}
+
 pub fn home_dir() -> Result<PathBuf> {
     #[cfg(windows)]
     {

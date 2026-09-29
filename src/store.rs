@@ -122,7 +122,7 @@ pub struct WalletContext {
 fn app_path() -> Result<PathBuf> {
     let mut p = home_dir()?;
     p.push(APP_DIR);
-    fs::create_dir_all(&p)?;
+    crate::utils::secure_create_dir_all(&p)?;
     Ok(p)
 }
 
